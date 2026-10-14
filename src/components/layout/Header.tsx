@@ -42,7 +42,7 @@ export default function Header({
         className={[
           "flex h-full items-center gap-2 px-3 sm:px-4",
           "transition-[padding] duration-200",
-          sidebarCollapsed ? "lg:pl-24" : "lg:pl-72",
+          sidebarCollapsed ? "lg:pl-20" : "lg:pl-64",
         ].join(" ")}
       >
         <button
