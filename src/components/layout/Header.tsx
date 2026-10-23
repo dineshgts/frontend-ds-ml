@@ -40,7 +40,7 @@ export default function Header({
     <header className="fixed inset-x-0 top-0 z-40 h-16 border-b border-slate-200 bg-white/95 backdrop-blur md:h-[72px]">
       <div
         className={[
-          "flex h-full items-center gap-2 px-3 sm:px-4",
+          "flex h-full items-center gap-3 px-3 sm:px-4",
           "transition-[padding] duration-200",
           sidebarCollapsed ? "lg:pl-20" : "lg:pl-64",
         ].join(" ")}
@@ -67,7 +67,12 @@ export default function Header({
           }
           aria-expanded={!sidebarCollapsed}
           aria-controls="global-sidebar"
-          className="hidden rounded-lg p-2 text-slate-500 hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 lg:inline-flex"
+          title={
+            sidebarCollapsed
+              ? "Expand sidebar"
+              : "Collapse sidebar"
+          }
+          className="hidden rounded-lg p-2 text-slate-500 transition-colors hover:bg-slate-100 hover:text-slate-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 lg:inline-flex"
         >
           {sidebarCollapsed ? (
             <PanelLeftOpen
@@ -82,7 +87,7 @@ export default function Header({
           )}
         </button>
 
-        {/* Application title and current page */}
+        {/* Current page */}
         <div className="flex min-w-0 items-center gap-2">
           <span className="hidden text-sm font-semibold text-slate-900 sm:inline">
             DataFlow

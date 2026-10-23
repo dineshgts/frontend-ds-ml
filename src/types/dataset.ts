@@ -1,12 +1,25 @@
-export type DatasetStatus = "uploaded" | "processing" | "ready" | "failed";
+export type DatasetStatus =
+  | "uploaded"
+  | "profiling"
+  | "ready"
+  | "failed";
 
 export interface Dataset {
   id: string;
   name: string;
-  description?: string;
-  status?: DatasetStatus;
-  rowCount?: number;
-  columnCount?: number;
-  createdAt?: string;
-  updatedAt?: string;
+  project_id: string | null;
+  row_count: number | null;
+  column_count: number | null;
+  status: DatasetStatus;
+  created_at: string;
+}
+
+export interface DatasetListResponse {
+  success: boolean;
+  data: Dataset[];
+  pagination: {
+    page: number;
+    page_size: number;
+    total: number;
+  };
 }
