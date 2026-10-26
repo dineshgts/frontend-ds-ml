@@ -1,3 +1,4 @@
+
 import Link from "next/link";
 import type { LucideIcon } from "lucide-react";
 
@@ -26,7 +27,7 @@ export default function NavigationItem({
     "group relative flex min-h-10 w-full items-center rounded-lg text-sm font-medium",
     "transition-colors duration-150",
     "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2",
-    collapsed ? "justify-center px-2" : "gap-3 px-3",
+    collapsed ? "gap-3 px-3 lg:justify-center lg:gap-0 lg:px-2" : "gap-3 px-3",
     disabled
       ? "cursor-not-allowed text-slate-300"
       : active
@@ -48,34 +49,43 @@ export default function NavigationItem({
         ].join(" ")}
       />
 
-      {!collapsed && (
-        <>
-          <span className="min-w-0 flex-1 truncate">{label}</span>
-          {badge !== undefined && (
-            <span
-              className={[
-                "rounded-full px-2 py-0.5 text-[10px] font-semibold",
-                active
-                  ? "bg-indigo-100 text-indigo-700"
-                  : "bg-slate-100 text-slate-500",
-              ].join(" ")}
-            >
-              {badge}
-            </span>
-          )}
-          {active && (
-            <span
-              aria-hidden="true"
-              className="h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-600"
-            />
-          )}
-        </>
+      <span
+        className={[
+          "min-w-0 flex-1 truncate",
+          collapsed ? "lg:hidden" : "",
+        ].join(" ")}
+      >
+        {label}
+      </span>
+
+      {badge !== undefined && (
+        <span
+          className={[
+            "shrink-0 rounded-full px-2 py-0.5 text-[10px] font-semibold",
+            collapsed ? "lg:hidden" : "",
+            active
+              ? "bg-indigo-100 text-indigo-700"
+              : "bg-slate-100 text-slate-500",
+          ].join(" ")}
+        >
+          {badge}
+        </span>
+      )}
+
+      {active && (
+        <span
+          aria-hidden="true"
+          className={[
+            "h-1.5 w-1.5 shrink-0 rounded-full bg-indigo-600",
+            collapsed ? "lg:hidden" : "",
+          ].join(" ")}
+        />
       )}
 
       {collapsed && badge !== undefined && (
         <span
           aria-hidden="true"
-          className="absolute right-1 top-1 h-2 w-2 rounded-full bg-indigo-500"
+          className="absolute right-1 top-1 hidden h-2 w-2 rounded-full bg-indigo-500 lg:block"
         />
       )}
     </>

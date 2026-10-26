@@ -13,9 +13,9 @@ export default function WorkspaceTabs({
   return (
     <nav
       aria-label="Workspace navigation"
-      className="overflow-x-auto border-b border-slate-200"
+      className="w-full min-w-0 max-w-full overflow-x-auto overscroll-x-contain border-b border-slate-200"
     >
-      <div className="flex min-w-max gap-1">
+      <div className="flex w-max min-w-full gap-1">
         {items.map((item) => {
           const active = activeHref
             ? item.href === activeHref

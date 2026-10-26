@@ -1,3 +1,4 @@
+
 import NavigationItem from "./NavigationItem";
 import type { NavigationGroupConfig } from "./navigation";
 
@@ -20,11 +21,15 @@ export default function NavigationGroup({
 }: NavigationGroupProps) {
   return (
     <section aria-label={group.title}>
-      {!collapsed && (
-        <h2 className="mb-2 px-3 text-[10px] font-semibold uppercase tracking-[0.16em] text-slate-400">
-          {group.title}
-        </h2>
-      )}
+      <h2
+        className={[
+          "mb-2 px-3 text-[10px] font-semibold uppercase",
+          "tracking-[0.16em] text-slate-400",
+          collapsed ? "lg:hidden" : "",
+        ].join(" ")}
+      >
+        {group.title}
+      </h2>
 
       <nav className="space-y-1">
         {group.items.map((item) => (
