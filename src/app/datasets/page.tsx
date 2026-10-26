@@ -1,6 +1,7 @@
 "use client";
 
-import { Database, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { Database, RefreshCw, UploadCloud } from "lucide-react";
 import DatasetTable from "@/components/datasets/DatasetTable";
 import DatasetPagination from "@/components/datasets/DatasetPagination";
 import LoadingState from "@/components/common/LoadingState";
@@ -33,15 +34,14 @@ export default function DatasetsPage() {
             Browse datasets, review their status, and open a dataset workspace.
           </p>
         </div>
-        <button
-          type="button"
-          onClick={refresh}
-          disabled={loading}
-          className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 self-start rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50 sm:self-auto"
-        >
-          <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" />
-          Refresh
-        </button>
+        <div className="flex flex-wrap items-center gap-2 self-start sm:self-auto">
+          <button type="button" onClick={refresh} disabled={loading} className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700 shadow-sm transition-colors hover:bg-slate-50 disabled:cursor-not-allowed disabled:opacity-50">
+            <RefreshCw className={`h-4 w-4 ${loading ? "animate-spin" : ""}`} aria-hidden="true" /> Refresh
+          </button>
+          <Link href="/datasets/upload" className="inline-flex min-h-10 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700">
+            <UploadCloud className="h-4 w-4" aria-hidden="true" /> Upload dataset
+          </Link>
+        </div>
       </header>
 
       <section className="overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
