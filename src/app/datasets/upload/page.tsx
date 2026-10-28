@@ -9,7 +9,7 @@ import ErrorState from "@/components/common/ErrorState";
 import { uploadDataset } from "@/api/datasets";
 
 const ACCEPTED_EXTENSIONS = [".csv", ".xlsx", ".xls"];
-const MAX_FILE_SIZE = 25 * 1024 * 1024;
+const MAX_FILE_SIZE = 50 * 1024 * 1024;
 
 function formatSize(bytes: number) {
   if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -30,6 +30,7 @@ export default function DatasetUploadPage() {
     setSubmissionState("idle");
     if (!selected) {
       setFile(null);
+      if (inputRef.current) inputRef.current.value = "";
       return;
     }
 
@@ -50,7 +51,7 @@ export default function DatasetUploadPage() {
     if (selected.size > MAX_FILE_SIZE) {
       setFile(null);
       if (inputRef.current) inputRef.current.value = "";
-      setValidationError("The file is larger than the 25 MB upload limit.");
+      setValidationError("The file is larger than the 50 MB upload limit.");
       return;
     }
     setFile(selected);
@@ -72,6 +73,10 @@ export default function DatasetUploadPage() {
     setSubmissionState("submitting");
     try {
       await uploadDataset(file);
+      setFile(null);
+      setDatasetName("");
+      setProjectId("");
+      if (inputRef.current) inputRef.current.value = "";
       setSubmissionState("success");
     } catch (cause: unknown) {
       setSubmissionState("error");
@@ -104,7 +109,7 @@ export default function DatasetUploadPage() {
           <button type="button" onClick={() => inputRef.current?.click()} className="flex min-h-44 w-full flex-col items-center justify-center rounded-xl border-2 border-dashed border-slate-300 bg-slate-50 px-4 py-6 text-center transition hover:border-indigo-400 hover:bg-indigo-50/40 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600">
             <UploadCloud className="mb-3 h-8 w-8 text-indigo-600" aria-hidden="true" />
             <span className="font-semibold text-slate-900">Choose a file to upload</span>
-            <span className="mt-1 text-sm text-slate-500">CSV, XLS or XLSX · Maximum 25 MB</span>
+            <span className="mt-1 text-sm text-slate-500">CSV, XLS or XLSX · Maximum 50 MB</span>
           </button>
           {file ? (
             <div className="mt-3 flex items-center gap-3 rounded-xl border border-emerald-200 bg-emerald-50 p-3">
@@ -125,7 +130,15 @@ export default function DatasetUploadPage() {
             <div><p className="font-semibold">Dataset uploaded successfully</p><p className="mt-1">The API accepted the file and registered its metadata. Return to the dataset list to view it.</p></div>
           </div>
         ) : null}
-        {submissionState === "error" ? <ErrorState title="Dataset upload failed" message={validationError ?? "The API could not accept this file. Please retry."} onRetry={() => { setSubmissionState("idle"); setValidationError(null); }} /> : null}
+        {submissionState === "error" ? <ErrorState title="Dataset upload failed" message={validationError ?? "The API could not accept this file. Please retry."} onRetry={() => {
+          setSubmissionState("idle");
+          setValidationError(null);
+          setFile(null);
+          setDatasetName("");
+          setProjectId("");
+          if (inputRef.current) inputRef.current.value = "";
+          window.setTimeout(() => inputRef.current?.click(), 0);
+        }} /> : null}
 
         <div className="flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
           <label className="flex items-center gap-2 text-xs text-slate-500"><input type="checkbox" checked={simulateError} onChange={(event) => setSimulateError(event.target.checked)} className="rounded border-slate-300" /> Simulate an upload error for testing</label>
