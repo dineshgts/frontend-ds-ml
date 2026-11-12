@@ -11,6 +11,7 @@ import DatasetTable from "@/components/datasets/DatasetTable";
 import DatasetPagination from "@/components/datasets/DatasetPagination";
 import LoadingState from "@/components/common/LoadingState";
 import ErrorState from "@/components/common/ErrorState";
+import EmptyState from "@/components/common/EmptyState";
 
 import { getDatasets } from "@/api/datasets";
 import { ApiRequestError } from "@/api/client";
@@ -114,9 +115,15 @@ export default function DatasetsPage() {
         ) : loading ? (
           <LoadingState label="Loading datasets from API" rows={5} />
         ) : total === 0 ? (
-          <div className="p-6 text-sm text-slate-500">
-            No datasets found. Upload a dataset if the backend upload endpoint is available.
-          </div>
+          <EmptyState
+            title="No datasets yet"
+            description="Upload a supported dataset to start profiling and data-quality analysis. The current MVP workflow is centered on structured tabular data."
+            action={
+              <Link href="/datasets/upload" className="inline-flex min-h-10 items-center gap-2 rounded-xl bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
+                <UploadCloud className="h-4 w-4" aria-hidden="true" /> Upload dataset
+              </Link>
+            }
+          />
         ) : (
           <>
             <DatasetTable datasets={paginatedDatasets} />
@@ -135,19 +142,7 @@ export default function DatasetsPage() {
         )}
       </section>
 
-      <section className="mt-5 rounded-xl border border-slate-200 bg-white p-5">
-        <h2 className="font-semibold text-slate-900">HR sample dataset</h2>
-        <p className="mt-1 text-sm text-slate-600">
-          Download the sample HR data for testing the dataset upload workflow.
-        </p>
-        <a
-          href="/sample-data/HR_Sample_Dataset.csv"
-          download
-          className="mt-3 inline-flex text-sm font-medium text-indigo-700 hover:text-indigo-900"
-        >
-          Download HR CSV →
-        </a>
-      </section>
+      
     </PageContainer>
   );
 }

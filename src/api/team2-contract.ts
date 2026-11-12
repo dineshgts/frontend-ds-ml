@@ -1,176 +1,181 @@
 /**
- * Team 2 API Contract v1 integration surface.
- *
- * IMPORTANT: These paths/types reflect Team 2's sample contract documents and must be
- * checked against the live FastAPI Swagger/OpenAPI schema before being treated as live.
- * The currently tested prototype dataset-list call remains GET /datasets in datasets.ts.
+ * Exact API contracts implemented by Team 2 FastAPI.
+ * Source of truth: FINAL_API_CONTRACT.md and the backend route schemas.
  */
-import { apiGet, apiPost, apiUpload } from "@/api/client";
+import { apiGet, apiPost } from "@/api/client";
 
 export const TEAM2_API_PATHS = {
   health: "/health",
-  datasets: "/api/v1/datasets",
-  datasetUpload: "/api/v1/datasets/upload",
-  datasetDetail: (datasetId: string) => `/api/v1/datasets/${encodeURIComponent(datasetId)}`,
-  datasetProfile: (datasetId: string) => `/api/v1/datasets/${encodeURIComponent(datasetId)}/profile`,
-  experiments: "/api/v1/experiments",
-  experimentDetail: (experimentId: string) => `/api/v1/experiments/${encodeURIComponent(experimentId)}`,
-  trainingJobs: "/api/v1/training/jobs",
-  trainingJobDetail: (jobId: string) => `/api/v1/training/jobs/${encodeURIComponent(jobId)}`,
-  predict: "/api/v1/predict",
+  profiling: "/api/v1/profiling/",
+  quality: "/api/v1/quality/",
+  orchestration: "/api/v1/orchestration/",
 } as const;
 
-export type Team2ApiEnvelope<T> = {
-  success: boolean;
-  message?: string;
-  data: T;
-};
+export type InferredType =
+  | "numerical" | "categorical" | "datetime" | "time"
+  | "text" | "boolean" | "mixed" | "empty";
+export type ProfilingStatus = "success" | "warning" | "failed";
+export type ColumnWarningCode =
+  | "EMPTY_COLUMN" | "CONSTANT_COLUMN" | "MIXED_TYPES" | "HIGH_CARDINALITY";
+export type ProfilingWarningCode =
+  | ColumnWarningCode | "EMPTY_DATASET" | "DUPLICATES_APPROXIMATE"
+  | "CLASS_DISTRIBUTION_SKIPPED";
 
-export type Team2Dataset = {
-  dataset_id: string;
-  dataset_name: string;
+export interface NumericSummary {
+  min?: number | null;
+  max?: number | null;
+  mean?: number | null;
+  median?: number | null;
+  std?: number | null;
+  q1?: number | null;
+  q3?: number | null;
+  skewness?: number | null;
+}
+export interface TopValue { value: string; count: number; percentage: number; }
+export interface HistogramBin { start: number; end: number; count: number; }
+export interface ColumnProfile {
+  name: string;
+  position: number;
+  dtype: string;
+  inferred_type: InferredType;
+  missing_count: number;
+  missing_pct: number;
+  unique_count: number;
+  likely_identifier: boolean;
+  warnings: ColumnWarningCode[];
+  summary?: NumericSummary | Record<string, unknown>;
+  top_values?: TopValue[];
+  histogram?: HistogramBin[];
+  mixed_breakdown?: Record<string, unknown>;
+}
+export interface ProfilingDataset {
   row_count: number;
   column_count: number;
-  status: string;
-  description?: string;
-  created_at?: string;
-  updated_at?: string;
-};
-
-export type Team2DatasetListResponse = Team2ApiEnvelope<Team2Dataset[]>;
-
-export type Team2DatasetUploadResponse = Team2ApiEnvelope<{
-  dataset_id: string;
-  dataset_name: string;
-  status: string;
-}>;
-
-export type Team2DatasetProfileResponse = Team2ApiEnvelope<{
-  dataset_id: string;
-  status?: string;
-  [key: string]: unknown;
-}>;
-
-export type Team2ExperimentRequest = {
-  dataset_id: string;
+  column_names: string[];
+  duplicate_row_count: number;
+}
+export interface DatasetReference { dataset_id: string; name?: string | null; }
+export interface CorrelationPair { column_a: string; column_b: string; coefficient: number; }
+export interface ClassCount { value: string; count: number; percentage: number; }
+export interface ClassDistribution {
   target_column: string;
-  problem_type: string;
-  experiment_name?: string;
-  description?: string;
-  [key: string]: unknown;
-};
-
-export type Team2Experiment = {
-  experiment_id: string;
-  dataset_id?: string;
-  status?: string;
-  experiment_name?: string;
-  [key: string]: unknown;
-};
-
-export type Team2TrainingJobRequest = {
-  experiment_id?: string;
-  dataset_id: string;
-  target_column: string;
-  problem_type: string;
-  algorithm?: string;
-  [key: string]: unknown;
-};
-
-export type Team2TrainingJob = {
-  job_id: string;
-  status: string;
-  [key: string]: unknown;
-};
-
-export type Team2PredictionRequest = {
-  model_id?: string;
-  model_name?: string;
-  input_data: Record<string, unknown> | Record<string, unknown>[];
-};
-
-export type Team2PredictionResponse = {
-  success?: boolean;
+  class_count: number;
+  classes: ClassCount[];
+  majority_class: string;
+  minority_class: string;
+  imbalance_ratio: number | null;
+  missing_count: number;
+}
+export interface ProfilingWarning {
+  code: ProfilingWarningCode;
+  severity: string;
+  column: string | null;
   message?: string;
-  data?: unknown;
-  predictions?: unknown;
-  [key: string]: unknown;
-};
+}
+export interface ProfilingError { code: string; message?: string; column?: string | null; }
+export interface ProfilingResponse {
+  schema_version: string;
+  request_id: string | null;
+  module: string;
+  status: ProfilingStatus | string;
+  generated_at: string;
+  duration_ms: number;
+  dataset_reference: DatasetReference;
+  dataset: ProfilingDataset;
+  columns: ColumnProfile[];
+  warnings: ProfilingWarning[];
+  errors: ProfilingError[];
+  correlations: CorrelationPair[];
+  class_distribution?: ClassDistribution;
+}
 
+export interface Team2ProfileRequest {
+  schema_version: "1.0-draft";
+  request_id: string;
+  dataset_reference: {
+    dataset_id: string;
+    source_type: "file";
+    name?: string;
+    location: string;
+  };
+  metadata?: {
+    format?: "csv" | "xlsx";
+    sheet_name?: string | number;
+    delimiter?: string;
+    encoding?: string;
+    missing_value_markers?: string[];
+    identifier_columns?: string[];
+  };
+  options?: {
+    top_n_values?: number;
+    include_statistics?: boolean;
+    target_column?: string;
+    include_correlations?: boolean;
+  };
+}
+
+export interface Team2QualityRequest { dataset_id: string; version: string; }
+export interface QualityIssue {
+  issue_id: string;
+  category: string;
+  severity: string;
+  affected_column: string;
+  affected_row_count: number;
+  description: string;
+  recommended_action: string;
+}
+export interface QualityValidationSummary {
+  total_issues_detected: number;
+  total_duplicate_records: number;
+  execution_mode: string;
+  source_mutated: boolean;
+}
+export interface Team2QualityResponse {
+  status: string;
+  message: string;
+  dataset_id: string;
+  version: string;
+  quality_metadata: {
+    validation_summary: QualityValidationSummary;
+    issue_logs: QualityIssue[];
+    errors: unknown[];
+  };
+}
+
+export interface Team2OrchestrationRequest {
+  dataset_id: string;
+  dataset_source: string;
+  request_id?: string;
+  dataset_name?: string;
+  target_col?: string;
+  id_cols?: string[];
+  options?: Record<string, unknown>;
+  metadata?: Record<string, unknown>;
+}
+export interface Team2OrchestrationResponse {
+  dataset_context: { dataset_id: string; dataset_name: string; source_type: string };
+  status: string;
+  service_status: { profiling: string; quality: string; semantic_analysis: string };
+  downstream_context: {
+    profiling_output_available: boolean;
+    quality_findings_available: boolean;
+    semantic_output_available: boolean;
+    quality_issue_count: number;
+  };
+  profiling: ProfilingResponse | Record<string, unknown>;
+  quality: Omit<Team2QualityResponse, "message" | "dataset_id" | "version"> | Record<string, unknown>;
+  semantic_analysis: { status: string; message?: string };
+}
+
+export function requestTeam2Profiling(payload: Team2ProfileRequest, options: { signal?: AbortSignal } = {}) {
+  return apiPost<ProfilingResponse, Team2ProfileRequest>(TEAM2_API_PATHS.profiling, payload, options);
+}
+export function requestTeam2Quality(payload: Team2QualityRequest, options: { signal?: AbortSignal } = {}) {
+  return apiPost<Team2QualityResponse, Team2QualityRequest>(TEAM2_API_PATHS.quality, payload, options);
+}
+export function requestTeam2Orchestration(payload: Team2OrchestrationRequest, options: { signal?: AbortSignal } = {}) {
+  return apiPost<Team2OrchestrationResponse, Team2OrchestrationRequest>(TEAM2_API_PATHS.orchestration, payload, options);
+}
 export function getTeam2Health(options: { signal?: AbortSignal } = {}) {
-  return apiGet<unknown>(TEAM2_API_PATHS.health, options);
-}
-
-export function getTeam2Datasets(options: { signal?: AbortSignal } = {}) {
-  return apiGet<Team2DatasetListResponse>(TEAM2_API_PATHS.datasets, options);
-}
-
-export function uploadTeam2Dataset(file: File, options: { signal?: AbortSignal } = {}) {
-  // Team 2's documents show multipart upload; confirm the exact form field name with Team 2.
-  return apiUpload<Team2DatasetUploadResponse>(TEAM2_API_PATHS.datasetUpload, file, "file", options);
-}
-
-export function getTeam2Dataset(datasetId: string, options: { signal?: AbortSignal } = {}) {
-  return apiGet<Team2ApiEnvelope<Team2Dataset>>(
-    TEAM2_API_PATHS.datasetDetail(datasetId),
-    options
-  );
-}
-
-export function requestTeam2DatasetProfile(
-  datasetId: string,
-  options: { signal?: AbortSignal } = {}
-) {
-  return apiPost<Team2DatasetProfileResponse, Record<string, never>>(
-    TEAM2_API_PATHS.datasetProfile(datasetId),
-    {},
-    options
-  );
-}
-
-export function createTeam2Experiment(
-  payload: Team2ExperimentRequest,
-  options: { signal?: AbortSignal } = {}
-) {
-  return apiPost<Team2ApiEnvelope<Team2Experiment>, Team2ExperimentRequest>(
-    TEAM2_API_PATHS.experiments,
-    payload,
-    options
-  );
-}
-
-export function getTeam2Experiment(experimentId: string, options: { signal?: AbortSignal } = {}) {
-  return apiGet<Team2ApiEnvelope<Team2Experiment>>(
-    TEAM2_API_PATHS.experimentDetail(experimentId),
-    options
-  );
-}
-
-export function createTeam2TrainingJob(
-  payload: Team2TrainingJobRequest,
-  options: { signal?: AbortSignal } = {}
-) {
-  return apiPost<Team2ApiEnvelope<Team2TrainingJob>, Team2TrainingJobRequest>(
-    TEAM2_API_PATHS.trainingJobs,
-    payload,
-    options
-  );
-}
-
-export function getTeam2TrainingJob(jobId: string, options: { signal?: AbortSignal } = {}) {
-  return apiGet<Team2ApiEnvelope<Team2TrainingJob>>(
-    TEAM2_API_PATHS.trainingJobDetail(jobId),
-    options
-  );
-}
-
-export function requestTeam2Prediction(
-  payload: Team2PredictionRequest,
-  options: { signal?: AbortSignal } = {}
-) {
-  return apiPost<Team2PredictionResponse, Team2PredictionRequest>(
-    TEAM2_API_PATHS.predict,
-    payload,
-    options
-  );
+  return apiGet<{ status: string }>(TEAM2_API_PATHS.health, options);
 }

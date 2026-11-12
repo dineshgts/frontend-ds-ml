@@ -1,24 +1,54 @@
+
 "use client";
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { ReactNode } from "react";
+
 import {
-  AlertTriangle, ArrowRight, CalendarDays, CheckCircle2, Clock3,
-  Columns3, Database, FileSpreadsheet, RefreshCw, Rows3, Sparkles,
-  TriangleAlert, XCircle, Info,
+  AlertTriangle,
+  ArrowLeft,
+  ArrowRight,
+  CalendarDays,
+  CheckCircle2,
+  Clock3,
+  Columns3,
+  Database,
+  FileSpreadsheet,
+  Play,
+  RefreshCw,
+  Rows3,
+  ShieldCheck,
+  TriangleAlert,
+  XCircle,
 } from "lucide-react";
+
 import PageHeader from "@/components/layout/PageHeader";
 import WorkspaceLayout from "@/components/layout/WorkspaceLayout";
 import DatasetStatusBadge from "@/components/datasets/DatasetStatusBadge";
 import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
-import { getDataset, getDatasetProfile, profileDataset } from "@/api/datasets";
-import type { DatasetProfile } from "@/api/datasets";
-import type { Dataset } from "@/types/dataset";
-import { formatDatasetDate, formatDatasetNumber } from "@/lib/dataset-format";
 
+import {
+  asQualityResponse,
+  getDataset,
+  getDatasetProcessingResult,
+} from "@/api/datasets";
+
+import type {
+  DatasetProfile,
+  DatasetQuality,
+} from "@/api/datasets";
+
+import type { Dataset } from "@/types/dataset";
+
+import {
+  formatDatasetDate,
+  formatDatasetNumber,
+} from "@/lib/dataset-format";
+
+// Dataset workspace navigation
 const sections = [
   { key: "overview", label: "Overview", slug: "" },
   { key: "quality", label: "Data Quality", slug: "quality" },
@@ -28,211 +58,979 @@ const sections = [
   { key: "recommendations", label: "Recommendations", slug: "recommendations" },
 ] as const;
 
+// Page descriptions
 const descriptions: Record<string, string> = {
-  overview: "Review dataset metadata, profiling summaries, and available actions.",
-  quality: "Inspect missing values and any warnings or validation issues returned by the API.",
-  columns: "Review column names, non-empty values, missing values, inferred types, and available statistics.",
-  distributions: "Explore distributions when the backend provides distribution statistics.",
-  correlations: "Review correlation results when they are provided by the backend.",
-  recommendations: "Review data preparation recommendations returned by the backend.",
+  overview: "Review dataset metadata and run Team 2 data profiling.",
+  quality:
+    "Run Team 2 validation against a registered dataset and inspect its issue logs.",
+  columns:
+    "Inspect inferred data types, missing values, unique values and descriptive statistics.",
+  distributions:
+    "Explore numeric histograms and categorical top values returned by profiling.",
+  correlations:
+    "Inspect the correlation output returned by the profiling service.",
+  recommendations:
+    "Recommendations are not included in the current Team 2 profiling or quality contracts.",
 };
 
-type ProfileState = "pending" | "running" | "completed" | "failed";
 type AnyRecord = Record<string, unknown>;
 
-function record(value: unknown): AnyRecord | null {
+// Helpers
+function asRecord(value: unknown): AnyRecord | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
-    ? value as AnyRecord : null;
+    ? (value as AnyRecord)
+    : null;
 }
+
 function numberValue(value: unknown): number | null {
-  return typeof value === "number" && Number.isFinite(value) ? value : null;
+  return typeof value === "number" && Number.isFinite(value)
+    ? value
+    : null;
 }
-function stringValue(value: unknown): string | null {
-  return typeof value === "string" && value.trim() ? value : null;
-}
+
 function display(value: unknown): string {
-  if (value === null || value === undefined || value === "") return "—";
-  if (typeof value === "number") return value.toLocaleString();
-  if (typeof value === "string" || typeof value === "boolean") return String(value);
-  return "—";
-}
-function profileStatus(profile: DatasetProfile | null, running: boolean, failed: boolean): ProfileState {
-  if (running) return "running";
-  if (failed) return "failed";
-  const status = (profile?.status ?? "not_started").toLowerCase();
-  if (["completed", "complete", "ready", "success", "succeeded"].includes(status)) return "completed";
-  if (["running", "profiling", "processing", "in_progress"].includes(status)) return "running";
-  if (["failed", "error"].includes(status)) return "failed";
-  return "pending";
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+
+  if (typeof value === "number") {
+    return value.toLocaleString(undefined, {
+      maximumFractionDigits: 3,
+    });
+  }
+
+  if (typeof value === "string" || typeof value === "boolean") {
+    return String(value);
+  }
+
+  return JSON.stringify(value);
 }
 
-function MetricCard({ label, value, icon: Icon, detail }: {
-  label: string; value: string; icon: typeof Database; detail?: string;
+// Reusable panel
+function Panel({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description?: string;
+  children: ReactNode;
 }) {
-  return <div className="rounded-xl border border-slate-200 bg-white p-4">
-    <div className="flex items-center justify-between gap-3"><p className="text-sm text-slate-500">{label}</p><Icon className="h-4 w-4 text-slate-400" aria-hidden="true" /></div>
-    <p className="mt-2 break-words text-xl font-semibold tabular-nums text-slate-950">{value}</p>
-    {detail && <p className="mt-1 text-xs text-slate-500">{detail}</p>}
-  </div>;
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
+      <div className="mb-4">
+        <h2 className="font-semibold text-slate-950">{title}</h2>
+
+        {description && (
+          <p className="mt-1 text-sm text-slate-500">
+            {description}
+          </p>
+        )}
+      </div>
+
+      {children}
+    </section>
+  );
 }
 
-function Panel({ title, description, children }: { title: string; description?: string; children: ReactNode }) {
-  return <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
-    <div className="mb-4"><h2 className="font-semibold text-slate-950">{title}</h2>{description && <p className="mt-1 text-sm text-slate-500">{description}</p>}</div>
-    {children}
-  </section>;
-}
-
-function StatusPanel({ status, message, onRun, disabled }: {
-  status: ProfileState; message?: string; onRun: () => void; disabled: boolean;
+// Reusable metric card
+function Metric({
+  label,
+  value,
+  icon: Icon,
+}: {
+  label: string;
+  value: string;
+  icon: typeof Database;
 }) {
-  const config = {
-    pending: { label: "Pending", cls: "bg-slate-100 text-slate-700", Icon: Clock3 },
-    running: { label: "Running", cls: "bg-amber-50 text-amber-800", Icon: RefreshCw },
-    completed: { label: "Completed", cls: "bg-emerald-50 text-emerald-700", Icon: CheckCircle2 },
-    failed: { label: "Failed", cls: "bg-red-50 text-red-700", Icon: XCircle },
-  }[status];
-  const Icon = config.Icon;
-  return <div className="rounded-xl border border-slate-200 bg-slate-50 p-4">
-    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-      <div className="flex items-start gap-3"><span className={`rounded-lg p-2 ${config.cls}`}><Icon className={`h-5 w-5 ${status === "running" ? "animate-spin" : ""}`} aria-hidden="true" /></span><div><div className="flex flex-wrap items-center gap-2"><h3 className="font-semibold text-slate-900">Profiling {config.label.toLowerCase()}</h3><span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${config.cls}`}>{config.label}</span></div><p className="mt-1 text-sm text-slate-600">{message ?? (status === "pending" ? "Profiling has not been started for this dataset." : status === "running" ? "The profile request is being processed." : status === "completed" ? "The backend returned profiling results." : "The profiling request failed. You can retry it.")}</p></div></div>
-      {status !== "completed" && <button type="button" onClick={onRun} disabled={disabled || status === "running"} className="inline-flex min-h-10 shrink-0 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-50"><RefreshCw className={`h-4 w-4 ${disabled || status === "running" ? "animate-spin" : ""}`} />{status === "failed" ? "Retry profiling" : status === "running" ? "Profiling…" : "Run profiling"}</button>}
+  return (
+    <div className="rounded-xl border border-slate-200 bg-white p-4">
+      <div className="flex items-center justify-between text-sm text-slate-500">
+        <span>{label}</span>
+        <Icon className="h-4 w-4" />
+      </div>
+
+      <p className="mt-2 text-xl font-semibold text-slate-950">
+        {value}
+      </p>
     </div>
-  </div>;
+  );
 }
 
-function getFindings(profile: DatasetProfile | null): Array<{ title: string; message: string; severity: string }> {
-  if (!profile) return [];
-  const source = profile as unknown as AnyRecord;
-  const raw = source.quality_findings ?? source.findings ?? source.warnings ?? source.validation_issues ?? source.issues;
-  if (!Array.isArray(raw)) return [];
-  return raw.map((item, index) => {
-    if (typeof item === "string") return { title: `Finding ${index + 1}`, message: item, severity: "warning" };
-    const obj = record(item) ?? {};
-    return {
-      title: stringValue(obj.title ?? obj.name ?? obj.code) ?? `Finding ${index + 1}`,
-      message: stringValue(obj.message ?? obj.description ?? obj.detail) ?? "The backend returned a finding without a message.",
-      severity: stringValue(obj.severity ?? obj.level ?? obj.type) ?? "warning",
-    };
-  });
+// Reusable error list
+function ErrorList({
+  title,
+  items,
+}: {
+  title: string;
+  items: unknown[];
+}) {
+  if (!items.length) {
+    return (
+      <p className="rounded-lg bg-emerald-50 p-3 text-sm text-emerald-800">
+        No {title.toLowerCase()} returned.
+      </p>
+    );
+  }
+
+  return (
+    <ul className="space-y-2">
+      {items.map((item, index) => {
+        const obj = asRecord(item);
+
+        const message = obj
+          ? obj.message ??
+            obj.description ??
+            obj.detail ??
+            JSON.stringify(obj)
+          : item;
+
+        return (
+          <li
+            key={index}
+            className="flex gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900"
+          >
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+            {display(message)}
+          </li>
+        );
+      })}
+    </ul>
+  );
 }
 
-function ProfileColumnsTable({ profile }: { profile: DatasetProfile }) {
-  const columns = Array.isArray(profile.columns) ? profile.columns : [];
-  if (!columns.length) return <div className="rounded-xl border border-dashed border-slate-300 p-8 text-center"><Columns3 className="mx-auto h-7 w-7 text-slate-400"/><p className="mt-2 text-sm font-semibold text-slate-800">No column details available</p><p className="mt-1 text-sm text-slate-500">The current API response does not contain column-level results for this dataset.</p></div>;
-  const rows = columns as unknown as AnyRecord[];
-  const totalRows = numberValue(profile.row_count);
-  return <div className="overflow-hidden rounded-xl border border-slate-200"><div className="overflow-x-auto"><table className="min-w-[760px] w-full divide-y divide-slate-200 text-left text-sm"><thead className="bg-slate-50 text-xs uppercase tracking-wide text-slate-500"><tr><th className="px-4 py-3 font-semibold">Column</th><th className="px-4 py-3 font-semibold">Data type</th><th className="px-4 py-3 text-right font-semibold">Non-empty</th><th className="px-4 py-3 text-right font-semibold">Missing</th><th className="px-4 py-3 text-right font-semibold">Missing %</th><th className="px-4 py-3 font-semibold">Sample values</th></tr></thead><tbody className="divide-y divide-slate-100 bg-white">{rows.map((column, index) => {
-    const name = stringValue(column.name ?? column.column_name) ?? `Column ${index + 1}`;
-    const nonEmpty = numberValue(column.non_empty_count ?? column.nonEmptyCount ?? column.non_null_count);
-    const missing = numberValue(column.missing_count ?? column.missingCount ?? column.null_count);
-    const missingPercent = numberValue(column.missing_percent ?? column.missing_percentage) ?? (missing !== null && totalRows ? missing / totalRows * 100 : null);
-    const type = stringValue(column.data_type ?? column.dtype ?? column.type ?? column.inferred_type) ?? "Not provided";
-    const samples = Array.isArray(column.sample_values) ? column.sample_values.map(display).join(", ") : display(column.sample_values);
-    return <tr key={`${name}-${index}`} className="hover:bg-slate-50/70"><td className="max-w-56 break-words px-4 py-3 font-medium text-slate-900">{name}</td><td className="px-4 py-3"><span className="rounded-md bg-slate-100 px-2 py-1 text-xs text-slate-700">{type}</span></td><td className="px-4 py-3 text-right tabular-nums text-slate-700">{display(nonEmpty)}</td><td className="px-4 py-3 text-right tabular-nums text-slate-700">{display(missing)}</td><td className="px-4 py-3 text-right tabular-nums text-slate-700">{missingPercent === null ? "—" : `${missingPercent.toFixed(1)}%`}</td><td className="max-w-64 px-4 py-3 text-slate-500"><span className="line-clamp-2">{samples === "—" ? "—" : samples}</span></td></tr>;
-  })}</tbody></table></div></div>;
-}
-
-export default function DatasetWorkspaceView({ section }: { section: string }) {
+// Main dataset workspace
+export default function DatasetWorkspaceView({
+  section,
+}: {
+  section: string;
+}) {
   const pathname = usePathname();
-  const parts = pathname.split("/").filter(Boolean);
-  const datasetId = parts[1] || "";
+
+  const datasetId =
+    pathname.split("/").filter(Boolean)[1] ?? "";
+
   const base = `/datasets/${datasetId}`;
-  const active = sections.find((item) => item.key === section) ?? sections[0];
-  const navigation = sections.map((item) => ({ label: item.label, href: item.slug ? `${base}/${item.slug}` : base }));
+
+  const active =
+    sections.find((item) => item.key === section) ?? sections[0];
+
+  const navigation = sections.map((item) => ({
+    label: item.label,
+    href: item.slug ? `${base}/${item.slug}` : base,
+  }));
+
+  // Dataset state
   const [dataset, setDataset] = useState<Dataset | null>(null);
-  const [profile, setProfile] = useState<DatasetProfile | null>(null);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [profileError, setProfileError] = useState<string | null>(null);
-  const [profiling, setProfiling] = useState(false);
-  const [profileFailed, setProfileFailed] = useState(false);
 
-  const loadData = useCallback(async (signal?: AbortSignal) => {
-    if (!datasetId) return;
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const datasetResult = await getDataset(datasetId, { signal });
-      setDataset(datasetResult);
+  // Profiling state
+  const [profile, setProfile] = useState<DatasetProfile | null>(null);
+  const [profileLoading, setProfileLoading] = useState(false);
+  const [profileError, setProfileError] = useState<string | null>(null);
+
+  // Quality state
+  const [quality, setQuality] = useState<DatasetQuality | null>(null);
+  const [qualityLoading, setQualityLoading] = useState(false);
+  const [qualityError, setQualityError] = useState<string | null>(null);
+
+  // Load dataset details
+  const loadDataset = useCallback(
+    async (signal?: AbortSignal) => {
+      if (!datasetId) return;
+
+      setLoading(true);
+      setLoadError(null);
+
       try {
-        const profileResult = await getDatasetProfile(datasetId, { signal });
-        setProfile(profileResult);
-        setProfileFailed(["failed", "error"].includes((profileResult.status ?? "").toLowerCase()));
+        setDataset(await getDataset(datasetId, { signal }));
       } catch (error) {
-        // A profile may not exist until the user starts profiling.
-        setProfile(null);
-        setProfileError(error instanceof Error ? error.message : "Could not load profiling status.");
+        if (!signal?.aborted) {
+          setLoadError(
+            error instanceof Error
+              ? error.message
+              : "Could not load dataset details."
+          );
+        }
+      } finally {
+        if (!signal?.aborted) {
+          setLoading(false);
+        }
       }
-    } catch (error) {
-      if (signal?.aborted) return;
-      setLoadError(error instanceof Error ? error.message : "Could not load dataset details.");
-    } finally {
-      if (!signal?.aborted) setLoading(false);
-    }
-  }, [datasetId]);
+    },
+    [datasetId]
+  );
 
   useEffect(() => {
     const controller = new AbortController();
-    void loadData(controller.signal);
+
+    void loadDataset(controller.signal);
+
     return () => controller.abort();
-  }, [loadData]);
+  }, [loadDataset]);
 
-  const status = profileStatus(profile, profiling, profileFailed);
-  const findings = useMemo(() => getFindings(profile), [profile]);
-  const columns = profile?.columns ?? [];
-  const totalMissing = columns.reduce((sum, column) => sum + (numberValue(column.missing_count) ?? 0), 0);
-  const hasMissingMetrics = columns.some((column) => numberValue(column.missing_count) !== null);
+  // Load profiling results
+  async function runProfile() {
+    if (!dataset) return;
 
-  async function runProfiling() {
-    if (!datasetId) return;
-    setProfiling(true);
-    setProfileFailed(false);
+    setProfileLoading(true);
     setProfileError(null);
+
     try {
-      const result = await profileDataset(datasetId);
-      setProfile(result);
-      setProfileFailed(["failed", "error"].includes((result.status ?? "").toLowerCase()));
-      if (["unavailable", "unsupported"].includes((result.status ?? "").toLowerCase())) setProfileError(result.message ?? "Profiling is not available for this dataset.");
+      const result = await getDatasetProcessingResult(dataset.id);
+
+      if (!result.profiling) {
+        throw new Error(
+          "The saved processing response does not contain profiling results."
+        );
+      }
+
+      setProfile(result.profiling);
+
+      const qualityResult = asQualityResponse(
+        dataset.id,
+        result.quality
+      );
+
+      if (qualityResult) {
+        setQuality(qualityResult);
+      }
     } catch (error) {
-      setProfileFailed(true);
-      setProfileError(error instanceof Error ? error.message : "Profiling failed. Please retry.");
+      setProfileError(
+        error instanceof Error
+          ? error.message
+          : "Profiling results could not be loaded."
+      );
     } finally {
-      setProfiling(false);
+      setProfileLoading(false);
     }
   }
 
-  if (loading) return <div className="mx-auto max-w-5xl p-6"><div className="animate-pulse space-y-4"><div className="h-7 w-56 rounded bg-slate-200"/><div className="h-28 rounded-2xl bg-slate-100"/><div className="grid gap-3 sm:grid-cols-3"><div className="h-24 rounded-xl bg-slate-100"/><div className="h-24 rounded-xl bg-slate-100"/><div className="h-24 rounded-xl bg-slate-100"/></div></div></div>;
-  if (loadError) return <div className="mx-auto max-w-3xl p-6"><ErrorState title="Could not load dataset" message={loadError} onRetry={() => void loadData()} /></div>;
-  if (!dataset) return <div className="mx-auto max-w-3xl p-6"><EmptyState title="Dataset not found" description="The requested dataset was not returned by the backend." action={<Link href="/datasets" className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white hover:bg-indigo-700">Back to datasets</Link>} /></div>;
+  // Load quality results
+  async function runQuality() {
+    if (!dataset) return;
 
-  const rowCount = numberValue(profile?.row_count) ?? dataset.row_count;
-  const columnCount = numberValue(profile?.column_count) ?? dataset.column_count;
-  const backendMessage = stringValue(profile?.message);
+    setQualityLoading(true);
+    setQualityError(null);
 
-  return <WorkspaceLayout title={dataset.name} description={`Dataset ID: ${dataset.id}`} navigation={navigation} navigationVariant="tabs" activeNavigationHref={pathname}
-    headerActions={<Link href="/datasets" className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50"><ArrowRight className="h-4 w-4 rotate-180" aria-hidden="true"/>All datasets</Link>}>
-    <PageHeader title={active.label} description={descriptions[active.key]} breadcrumb={`Datasets / ${dataset.name}`} />
+    try {
+      const result = await getDatasetProcessingResult(dataset.id);
 
-    <div className="mt-5 space-y-6">
-      <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
-        <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between"><div className="flex min-w-0 items-start gap-3"><div className="rounded-xl bg-indigo-50 p-3 text-indigo-700"><FileSpreadsheet className="h-6 w-6" aria-hidden="true"/></div><div className="min-w-0"><h2 className="break-words text-lg font-semibold text-slate-950">{dataset.name}</h2><p className="mt-1 break-all font-mono text-xs text-slate-500">{dataset.id}</p><div className="mt-3"><DatasetStatusBadge status={dataset.status}/></div></div></div><div className="inline-flex items-center gap-2 rounded-lg bg-slate-50 px-3 py-2 text-sm text-slate-600"><CalendarDays className="h-4 w-4" aria-hidden="true"/>Created {formatDatasetDate(dataset.created_at)}</div></div>
-        <div className="mt-6 grid gap-3 sm:grid-cols-2 xl:grid-cols-4"><MetricCard label="Rows" value={formatDatasetNumber(rowCount)} icon={Rows3}/><MetricCard label="Columns" value={formatDatasetNumber(columnCount)} icon={Columns3}/><MetricCard label="Missing values" value={hasMissingMetrics ? totalMissing.toLocaleString() : "—"} icon={TriangleAlert} detail={hasMissingMetrics ? "Across profiled columns" : "Not returned by API"}/><MetricCard label="Project" value={dataset.project_id ?? "Unassigned"} icon={Database}/></div>
-      </section>
+      const qualityResult = asQualityResponse(
+        dataset.id,
+        result.quality
+      );
 
-      {(active.key === "overview" || active.key === "quality") && <Panel title="Profiling status" description="Status is mapped from the backend profile response; a request in progress is shown separately."><StatusPanel status={status} message={profileError ?? backendMessage ?? (profileError ? undefined : undefined)} onRun={() => void runProfiling()} disabled={profiling}/>{profileError && <p role="alert" className="mt-3 text-sm text-red-700">{profileError}</p>}</Panel>}
+      if (!qualityResult) {
+        throw new Error(
+          "The saved processing response does not contain quality results."
+        );
+      }
 
-      {(active.key === "overview" || active.key === "columns") && <Panel title="Column summary" description="Values are displayed only when supplied by the profiling API. Missing percentage is calculated from returned missing counts and row count."><ProfileColumnsTable profile={profile ?? { dataset_id: dataset.id, status: "not_started" }}/></Panel>}
+      setQuality(qualityResult);
+    } catch (error) {
+      setQuality(null);
 
-      {(active.key === "overview" || active.key === "quality") && <Panel title="Data-quality findings" description="Warnings and validation issues are read from optional findings fields in the API response; no findings are invented.">
-        {findings.length ? <div className="space-y-3">{findings.map((finding, index) => { const isError = /error|critical|fail|invalid/i.test(finding.severity); return <div key={`${finding.title}-${index}`} className={`flex gap-3 rounded-xl border p-4 ${isError ? "border-red-200 bg-red-50" : "border-amber-200 bg-amber-50"}`}><AlertTriangle className={`mt-0.5 h-5 w-5 shrink-0 ${isError ? "text-red-600" : "text-amber-700"}`} aria-hidden="true"/><div><div className="flex flex-wrap items-center gap-2"><p className={`font-semibold ${isError ? "text-red-900" : "text-amber-900"}`}>{finding.title}</p><span className={`rounded-full px-2 py-0.5 text-xs font-semibold uppercase ${isError ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}`}>{finding.severity}</span></div><p className={`mt-1 text-sm ${isError ? "text-red-800" : "text-amber-800"}`}>{finding.message}</p></div></div>; })}</div> : <div className="flex items-start gap-3 rounded-xl border border-dashed border-slate-300 p-4"><Info className="mt-0.5 h-5 w-5 text-slate-400" aria-hidden="true"/><div><p className="font-medium text-slate-800">No quality findings returned</p><p className="mt-1 text-sm text-slate-500">The current backend profile contract returns column counts and sample values, but does not currently define a dedicated quality-findings payload. This section will display warnings when the API provides them.</p></div></div>}
-      </Panel>}
+      setQualityError(
+        error instanceof Error
+          ? error.message
+          : "Data-quality results could not be loaded."
+      );
+    } finally {
+      setQualityLoading(false);
+    }
+  }
 
-      {active.key === "columns" && profile && <Panel title="Available statistics" description="Additional statistics appear when included in each column's API object."><div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">{columns.map((column, index) => { const obj = column as unknown as AnyRecord; const stats = record(obj.statistics ?? obj.stats) ?? obj; const keys = ["unique_count", "unique_values", "distinct_count", "mean", "median", "std", "min", "max", "outlier_count", "cardinality"]; const available = keys.filter((key) => stats[key] !== undefined && stats[key] !== null); return <div key={`${column.name}-${index}`} className="rounded-xl border border-slate-200 p-4"><h3 className="truncate font-semibold text-slate-900">{column.name}</h3>{available.length ? <dl className="mt-3 space-y-2">{available.map((key) => <div key={key} className="flex items-center justify-between gap-3 text-sm"><dt className="capitalize text-slate-500">{key.replaceAll("_", " ")}</dt><dd className="font-medium tabular-nums text-slate-800">{display(stats[key])}</dd></div>)}</dl> : <p className="mt-2 text-sm text-slate-500">No additional statistics supplied.</p>}</div>; })}</div></Panel>}
+  // Derived values
+  const profileColumns = profile?.columns ?? [];
 
-      {!["overview", "quality", "columns"].includes(active.key) && <Panel title={`${active.label} data`} description={descriptions[active.key]}><EmptyState title={`${active.label} not provided by this API response`} description="The current profiling endpoint does not return this analysis yet. This view avoids showing fabricated charts or recommendations." action={<button type="button" onClick={() => void loadData()} className="rounded-lg border border-slate-200 px-3 py-2 text-sm font-semibold text-slate-700 hover:bg-slate-50">Refresh data</button>}/></Panel>}
+  const totalMissing = profileColumns.reduce(
+    (sum, column) =>
+      sum + (numberValue(column.missing_count) ?? 0),
+    0
+  );
 
-      <div className="flex flex-wrap gap-2">{sections.filter((item) => item.key !== active.key).map((item) => <Link key={item.key} href={item.slug ? `${base}/${item.slug}` : base} className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-indigo-300 hover:text-indigo-700">{item.label}<ArrowRight className="h-3.5 w-3.5" aria-hidden="true"/></Link>)}</div>
+  const datasetStats = profile?.dataset;
+
+  const summary = quality?.quality_metadata?.validation_summary;
+
+  const correlations = profile?.correlations;
+
+  // Loading state
+  if (loading) {
+    return (
+      <div className="p-8 text-sm text-slate-500">
+        Loading dataset…
+      </div>
+    );
+  }
+
+  // Error state
+  if (loadError) {
+    return (
+      <div className="mx-auto max-w-3xl p-6">
+        <ErrorState
+          title="Could not load dataset"
+          message={loadError}
+          onRetry={() => void loadDataset()}
+        />
+      </div>
+    );
+  }
+
+  // Dataset not found
+  if (!dataset) {
+    return (
+      <div className="mx-auto max-w-3xl p-6">
+        <EmptyState
+          title="Dataset not found"
+          description="The dataset details endpoint did not return this dataset."
+          action={
+            <Link
+              href="/datasets"
+              className="rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white"
+            >
+              Back to datasets
+            </Link>
+          }
+        />
+      </div>
+    );
+  }
+
+ return (
+  <>
+    {/* Back button outside WorkspaceLayout */}
+    <div className="mb-4 px-6 pt-4">
+      <Link
+        href="/datasets"
+        className="inline-flex items-center gap-2 text-sm font-medium text-slate-600 hover:text-indigo-700"
+      >
+        <ArrowLeft className="h-4 w-4" />
+        Back to datasets
+      </Link>
     </div>
-  </WorkspaceLayout>;
+
+    <WorkspaceLayout
+      title={dataset.name}
+      description={`Dataset ID: ${dataset.id}`}
+      navigation={navigation}
+      navigationVariant="tabs"
+      activeNavigationHref={pathname}
+    >
+      <PageHeader
+        title={active.label}
+        description={descriptions[active.key]}
+        breadcrumb={`Datasets / ${dataset.name}`}
+      />
+      <div className="mt-5 space-y-6">
+
+        {/* Dataset overview card */}
+        <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="flex items-start gap-3">
+              <span className="rounded-xl bg-indigo-50 p-3 text-indigo-700">
+                <FileSpreadsheet className="h-6 w-6" />
+              </span>
+
+              <div>
+                <h2 className="font-semibold text-slate-950">
+                  {dataset.name}
+                </h2>
+
+                <p className="mt-1 font-mono text-xs text-slate-500">
+                  {dataset.id}
+                </p>
+
+                <div className="mt-2">
+                  <DatasetStatusBadge status={dataset.status} />
+                </div>
+              </div>
+            </div>
+
+            <p className="inline-flex items-center gap-2 text-sm text-slate-500">
+              <CalendarDays className="h-4 w-4" />
+              Created {formatDatasetDate(dataset.created_at)}
+            </p>
+          </div>
+
+          <div className="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+            <Metric
+              label="Rows"
+              value={formatDatasetNumber(
+                numberValue(datasetStats?.row_count) ??
+                  dataset.row_count
+              )}
+              icon={Rows3}
+            />
+
+            <Metric
+              label="Columns"
+              value={formatDatasetNumber(
+                numberValue(datasetStats?.column_count) ??
+                  dataset.column_count
+              )}
+              icon={Columns3}
+            />
+
+            <Metric
+              label="Missing values"
+              value={
+                profile
+                  ? totalMissing.toLocaleString()
+                  : "—"
+              }
+              icon={TriangleAlert}
+            />
+
+            <Metric
+              label="Duplicate rows"
+              value={
+                profile
+                  ? display(datasetStats?.duplicate_row_count)
+                  : "—"
+              }
+              icon={Database}
+            />
+          </div>
+        </section>
+
+        {/* Profiling section */}
+        {(
+          active.key === "overview" ||
+          active.key === "columns" ||
+          active.key === "distributions" ||
+          active.key === "correlations"
+        ) && (
+          <Panel
+            title="Data profiling"
+            description="Loads the saved profiling result generated automatically after upload by Team 2 background processing."
+          >
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void runProfile()}
+                disabled={
+                  profileLoading || dataset.status !== "ready"
+                }
+                className="inline-flex items-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {profileLoading ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Play className="h-4 w-4" />
+                )}
+
+                {profileLoading
+                  ? "Loading results…"
+                  : dataset.status !== "ready"
+                    ? `Processing (${dataset.status})…`
+                    : profile
+                      ? "Reload profiling results"
+                      : "Load profiling results"}
+              </button>
+
+              {profile && (
+                <span className="inline-flex items-center gap-1 text-sm text-emerald-700">
+                  <CheckCircle2 className="h-4 w-4" />
+                  API status: {profile.status}
+                </span>
+              )}
+            </div>
+
+            {profileError && (
+              <div role="alert" className="mt-3">
+                <ErrorState
+                  title="Profiling could not be completed"
+                  message={profileError}
+                  onRetry={() => void runProfile()}
+                />
+              </div>
+            )}
+
+            {profile && (
+              <p className="mt-3 text-xs text-slate-500">
+                Request {profile.request_id} · Generated{" "}
+                {new Date(profile.generated_at).toLocaleString()} ·{" "}
+                {display(profile.duration_ms)} ms
+              </p>
+            )}
+          </Panel>
+        )}
+
+        {/* Column profile */}
+        {profile &&
+          (active.key === "overview" || active.key === "columns") && (
+            <Panel
+              title="Column profile"
+              description="Column names, inferred types, missing counts, unique counts and statistics from Team 2."
+            >
+              <div className="overflow-x-auto">
+                <table className="min-w-[760px] w-full text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                      {[
+                        "Column",
+                        "Inferred type",
+                        "Data type",
+                        "Missing",
+                        "Missing %",
+                        "Unique",
+                        "Identifier?",
+                      ].map((item) => (
+                        <th key={item} className="px-3 py-3">
+                          {item}
+                        </th>
+                      ))}
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-100">
+                    {profileColumns.map((column) => (
+                      <tr key={column.name}>
+                        <td className="px-3 py-3 font-medium text-slate-900">
+                          {column.name}
+                        </td>
+
+                        <td className="px-3 py-3">
+                          {column.inferred_type}
+                        </td>
+
+                        <td className="px-3 py-3">
+                          {column.dtype}
+                        </td>
+
+                        <td className="px-3 py-3 tabular-nums">
+                          {display(column.missing_count)}
+                        </td>
+
+                        <td className="px-3 py-3 tabular-nums">
+                          {display(column.missing_pct)}%
+                        </td>
+
+                        <td className="px-3 py-3 tabular-nums">
+                          {display(column.unique_count)}
+                        </td>
+
+                        <td className="px-3 py-3">
+                          {column.likely_identifier ? "Yes" : "No"}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+
+              {profileColumns.length === 0 && (
+                <p className="text-sm text-slate-500">
+                  The profiling response did not contain column details.
+                </p>
+              )}
+
+              <div className="mt-4 grid gap-3 md:grid-cols-2">
+                {profileColumns
+                  .filter((column) => column.summary)
+                  .map((column) => (
+                    <div
+                      key={column.name}
+                      className="rounded-xl border border-slate-200 p-4"
+                    >
+                      <h3 className="font-semibold">
+                        {column.name} statistics
+                      </h3>
+
+                      <dl className="mt-2 grid grid-cols-2 gap-2 text-sm">
+                        {Object.entries(column.summary ?? {}).map(
+                          ([key, value]) => (
+                            <div key={key}>
+                              <dt className="text-slate-500">
+                                {key.replaceAll("_", " ")}
+                              </dt>
+
+                              <dd className="font-medium">
+                                {display(value)}
+                              </dd>
+                            </div>
+                          )
+                        )}
+                      </dl>
+                    </div>
+                  ))}
+              </div>
+            </Panel>
+          )}
+
+        {/* Distributions */}
+        {profile && active.key === "distributions" && (
+          <Panel
+            title="Column distributions"
+            description="Numeric histograms and categorical top values returned by the profiling API."
+          >
+            <div className="space-y-4">
+              {profileColumns.map((column) => (
+                <div
+                  key={column.name}
+                  className="rounded-xl border border-slate-200 p-4"
+                >
+                  <h3 className="font-semibold">
+                    {column.name}
+                    <span className="ml-2 text-xs font-normal text-slate-500">
+                      {column.inferred_type}
+                    </span>
+                  </h3>
+
+                  {column.histogram?.length ? (
+                    <div className="mt-3 flex h-36 items-end gap-1 border-b border-slate-200 pb-1">
+                      {column.histogram.map((bin, index) => {
+                        const max = Math.max(
+                          1,
+                          ...column.histogram!.map((item) => item.count)
+                        );
+
+                        return (
+                          <div
+                            key={index}
+                            title={`${bin.start}–${bin.end}: ${bin.count}`}
+                            className="flex-1 rounded-t bg-indigo-500"
+                            style={{
+                              height: `${Math.max(
+                                2,
+                                (bin.count / max) * 100
+                              )}%`,
+                            }}
+                          />
+                        );
+                      })}
+                    </div>
+                  ) : column.top_values?.length ? (
+                    <div className="mt-3 space-y-2">
+                      {column.top_values.map((item, index) => (
+                        <div
+                          key={index}
+                          className="grid grid-cols-[minmax(0,1fr)_3fr_auto] items-center gap-3 text-sm"
+                        >
+                          <span className="truncate">
+                            {display(item.value)}
+                          </span>
+
+                          <div className="h-2 rounded bg-slate-100">
+                            <div
+                              className="h-2 rounded bg-indigo-500"
+                              style={{
+                                width: `${Math.max(
+                                  0,
+                                  Math.min(100, item.percentage)
+                                )}%`,
+                              }}
+                            />
+                          </div>
+
+                          <span className="tabular-nums text-slate-500">
+                            {item.percentage}%
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="mt-2 text-sm text-slate-500">
+                      No distribution values returned for this column.
+                    </p>
+                  )}
+                </div>
+              ))}
+            </div>
+          </Panel>
+        )}
+
+        {/* Correlations */}
+        {profile && active.key === "correlations" && (
+          <Panel
+            title="Correlation results"
+            description="Correlation pairs returned by Team 2's profiling API."
+          >
+            <div className="overflow-x-auto">
+              {correlations?.length ? (
+                <table className="w-full min-w-[520px] text-left text-sm">
+                  <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                    <tr>
+                      <th className="px-3 py-3">Column A</th>
+                      <th className="px-3 py-3">Column B</th>
+                      <th className="px-3 py-3">Coefficient</th>
+                    </tr>
+                  </thead>
+
+                  <tbody className="divide-y divide-slate-100">
+                    {correlations.map((pair, index) => (
+                      <tr
+                        key={`${pair.column_a}-${pair.column_b}-${index}`}
+                      >
+                        <td className="px-3 py-3 font-medium">
+                          {pair.column_a}
+                        </td>
+
+                        <td className="px-3 py-3">
+                          {pair.column_b}
+                        </td>
+
+                        <td className="px-3 py-3 tabular-nums">
+                          {display(pair.coefficient)}
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              ) : (
+                <EmptyState
+                  title="No correlations returned"
+                  description="The profiling response contains no correlation pairs for this dataset."
+                />
+              )}
+            </div>
+          </Panel>
+        )}
+
+        {/* Class distribution */}
+        {profile?.class_distribution &&
+          (active.key === "overview" || active.key === "columns") && (
+            <Panel
+              title="Class distribution"
+              description={`Target column: ${profile.class_distribution.target_column}`}
+            >
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <Metric
+                  label="Classes"
+                  value={display(profile.class_distribution.class_count)}
+                  icon={Columns3}
+                />
+
+                <Metric
+                  label="Majority class"
+                  value={display(profile.class_distribution.majority_class)}
+                  icon={CheckCircle2}
+                />
+
+                <Metric
+                  label="Minority class"
+                  value={display(profile.class_distribution.minority_class)}
+                  icon={TriangleAlert}
+                />
+
+                <Metric
+                  label="Imbalance ratio"
+                  value={display(profile.class_distribution.imbalance_ratio)}
+                  icon={Database}
+                />
+              </div>
+
+              <div className="mt-4 space-y-2">
+                {profile.class_distribution.classes.map((item) => (
+                  <div
+                    key={item.value}
+                    className="grid grid-cols-[minmax(0,1fr)_3fr_auto] items-center gap-3 text-sm"
+                  >
+                    <span className="truncate">{item.value}</span>
+
+                    <div className="h-2 rounded bg-slate-100">
+                      <div
+                        className="h-2 rounded bg-indigo-500"
+                        style={{
+                          width: `${Math.max(
+                            0,
+                            Math.min(100, item.percentage)
+                          )}%`,
+                        }}
+                      />
+                    </div>
+
+                    <span className="tabular-nums text-slate-500">
+                      {item.count} ({item.percentage}%)
+                    </span>
+                  </div>
+                ))}
+              </div>
+
+              <p className="mt-3 text-xs text-slate-500">
+                Missing target values:{" "}
+                {display(profile.class_distribution.missing_count)}
+              </p>
+            </Panel>
+          )}
+
+        {/* Quality validation */}
+        {active.key === "quality" && (
+          <Panel
+            title="Data quality validation"
+            description="Loads the quality result generated automatically for this uploaded dataset by Team 2 background processing."
+          >
+            <div className="flex flex-wrap items-center gap-3">
+              <button
+                type="button"
+                onClick={() => void runQuality()}
+                disabled={
+                  qualityLoading || dataset.status !== "ready"
+                }
+                className="inline-flex items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white disabled:opacity-60"
+              >
+                {qualityLoading ? (
+                  <RefreshCw className="h-4 w-4 animate-spin" />
+                ) : (
+                  <ShieldCheck className="h-4 w-4" />
+                )}
+
+                {qualityLoading
+                  ? "Loading results…"
+                  : "Load quality results"}
+              </button>
+
+              <span className="text-xs text-slate-500">
+                Results are generated during the upload processing workflow.
+              </span>
+            </div>
+
+            {qualityError && (
+              <div role="alert" className="mt-4">
+                <ErrorState
+                  title="Quality validation failed"
+                  message={qualityError}
+                  onRetry={() => void runQuality()}
+                />
+              </div>
+            )}
+
+            {quality && (
+              <div className="mt-5 space-y-4">
+                <div
+                  className={`flex items-center gap-2 rounded-lg p-3 text-sm ${
+                    quality.status === "success"
+                      ? "bg-emerald-50 text-emerald-800"
+                      : "bg-amber-50 text-amber-900"
+                  }`}
+                >
+                  {quality.status === "success" ? (
+                    <CheckCircle2 className="h-5 w-5" />
+                  ) : (
+                    <XCircle className="h-5 w-5" />
+                  )}
+
+                  <span className="font-semibold">
+                    {quality.message}
+                  </span>
+                </div>
+
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <Metric
+                    label="Issues detected"
+                    value={display(summary?.total_issues_detected)}
+                    icon={TriangleAlert}
+                  />
+
+                  <Metric
+                    label="Duplicate records"
+                    value={display(summary?.total_duplicate_records)}
+                    icon={Rows3}
+                  />
+
+                  <Metric
+                    label="Execution mode"
+                    value={display(summary?.execution_mode)}
+                    icon={Clock3}
+                  />
+
+                  <Metric
+                    label="Source mutated"
+                    value={display(summary?.source_mutated)}
+                    icon={Database}
+                  />
+                </div>
+
+                <div>
+                  <h3 className="mb-2 font-semibold">Issue logs</h3>
+
+                  <ErrorList
+                    title="Issue logs"
+                    items={quality.quality_metadata?.issue_logs ?? []}
+                  />
+                </div>
+
+                <div>
+                  <h3 className="mb-2 font-semibold">
+                    Validation errors
+                  </h3>
+
+                  <ErrorList
+                    title="Validation errors"
+                    items={quality.quality_metadata?.errors ?? []}
+                  />
+                </div>
+
+                <p className="text-xs text-slate-500">
+                  Dataset: {quality.dataset_id} · Version: {quality.version}
+                </p>
+              </div>
+            )}
+          </Panel>
+        )}
+
+        {/* Recommendations */}
+        {active.key === "recommendations" && (
+          <Panel
+            title="Recommendations"
+            description="The current Team 2 API contract does not include a recommendations endpoint or response field."
+          >
+            <EmptyState
+              title="Recommendations are not available yet"
+              description="This page is retained in the workspace. It will display recommendations when an API contract is provided."
+            />
+          </Panel>
+        )}
+
+        {/* Empty profiling state */}
+        {active.key !== "quality" &&
+          active.key !== "recommendations" &&
+          !profile && (
+            <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
+              Run data profiling to populate this section with backend results.
+            </p>
+          )}
+
+        {/* Profiling warnings */}
+        {profile && profile.warnings?.length > 0 && (
+          <Panel title="Profiling warnings">
+            <ErrorList
+              title="Warnings"
+              items={profile.warnings}
+            />
+          </Panel>
+        )}
+
+        {/* Profiling errors */}
+        {profile && profile.errors?.length > 0 && (
+          <Panel title="Profiling errors">
+            <ErrorList
+              title="Errors"
+              items={profile.errors}
+            />
+          </Panel>
+        )}
+
+        {/* Navigation links */}
+        <div className="flex flex-wrap gap-2">
+          {sections
+            .filter((item) => item.key !== active.key)
+            .map((item) => (
+              <Link
+                key={item.key}
+                href={item.slug ? `${base}/${item.slug}` : base}
+                className="inline-flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm font-medium text-slate-700 hover:border-indigo-300 hover:text-indigo-700"
+              >
+                {item.label}
+                <ArrowRight className="h-3.5 w-3.5" />
+              </Link>
+            ))}
+        </div>
+      </div>
+    </WorkspaceLayout>
+    </>
+  );
 }
