@@ -1,2 +1,5 @@
-import DatasetWorkspaceView from "@/components/workspaces/DatasetWorkspaceView";
-export default function DatasetSectionPage() { return <DatasetWorkspaceView section="distributions" />; }
+import DatasetDistributions from "@/components/datasets/distributions/DatasetDistributions";
+
+export default function DatasetDistributionsPage() {
+  return <DatasetDistributions />;
+}

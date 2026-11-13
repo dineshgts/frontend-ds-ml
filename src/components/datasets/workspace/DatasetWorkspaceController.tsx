@@ -31,15 +31,13 @@ import EmptyState from "@/components/common/EmptyState";
 import ErrorState from "@/components/common/ErrorState";
 
 import {
-  asQualityResponse,
   getDataset,
   getDatasetProcessingResult,
 } from "@/api/datasets";
 
-import type {
-  DatasetProfile,
-  DatasetQuality,
-} from "@/api/datasets";
+import type { DatasetProfile } from "@/api/datasets";
+import { requestTeam2Quality } from "@/api/team2-contract";
+import type { Team2QualityResponse } from "@/api/team2-contract";
 
 import type { Dataset } from "@/types/dataset";
 
@@ -231,7 +229,7 @@ export default function DatasetWorkspaceView({
   const [profileError, setProfileError] = useState<string | null>(null);
 
   // Quality state
-  const [quality, setQuality] = useState<DatasetQuality | null>(null);
+  const [quality, setQuality] = useState<Team2QualityResponse | null>(null);
   const [qualityLoading, setQualityLoading] = useState(false);
   const [qualityError, setQualityError] = useState<string | null>(null);
 
@@ -288,14 +286,6 @@ export default function DatasetWorkspaceView({
 
       setProfile(result.profiling);
 
-      const qualityResult = asQualityResponse(
-        dataset.id,
-        result.quality
-      );
-
-      if (qualityResult) {
-        setQuality(qualityResult);
-      }
     } catch (error) {
       setProfileError(
         error instanceof Error
@@ -307,35 +297,32 @@ export default function DatasetWorkspaceView({
     }
   }
 
-  // Load quality results
+  // Run Team 2 Data Quality validation
   async function runQuality() {
     if (!dataset) return;
 
     setQualityLoading(true);
     setQualityError(null);
+    setQuality(null);
 
     try {
-      const result = await getDatasetProcessingResult(dataset.id);
-
-      const qualityResult = asQualityResponse(
-        dataset.id,
-        result.quality
-      );
-
-      if (!qualityResult) {
-        throw new Error(
-          "The saved processing response does not contain quality results."
-        );
-      }
+      // Team 2's current POST /api/v1/quality/ schema requires a version
+      // field, but its validate_dataset() implementation looks up the file
+      // by dataset_id and does not use request.version. Uploaded registry
+      // records currently do not include a version, so send this contract
+      // placeholder only when the backend has not supplied a real version.
+      const qualityResult = await requestTeam2Quality({
+        dataset_id: dataset.id,
+        version: dataset.version ?? "uploaded-dataset",
+      });
 
       setQuality(qualityResult);
     } catch (error) {
       setQuality(null);
-
       setQualityError(
         error instanceof Error
           ? error.message
-          : "Data-quality results could not be loaded."
+          : "Data-quality validation could not be completed."
       );
     } finally {
       setQualityLoading(false);
@@ -352,8 +339,6 @@ export default function DatasetWorkspaceView({
   );
 
   const datasetStats = profile?.dataset;
-
-  const summary = quality?.quality_metadata?.validation_summary;
 
   const correlations = profile?.correlations;
 
@@ -861,7 +846,7 @@ export default function DatasetWorkspaceView({
         {active.key === "quality" && (
           <Panel
             title="Data quality validation"
-            description="Loads the quality result generated automatically for this uploaded dataset by Team 2 background processing."
+            description="Run Team 2 validation and inspect the returned violations, severity and affected records."
           >
             <div className="flex flex-wrap items-center gap-3">
               <button
@@ -879,12 +864,12 @@ export default function DatasetWorkspaceView({
                 )}
 
                 {qualityLoading
-                  ? "Loading results…"
-                  : "Load quality results"}
+                  ? "Validating…"
+                  : "Run quality validation"}
               </button>
 
               <span className="text-xs text-slate-500">
-                Results are generated during the upload processing workflow.
+                Validation is performed by the Team 2 quality API.
               </span>
             </div>
 
@@ -899,74 +884,79 @@ export default function DatasetWorkspaceView({
             )}
 
             {quality && (
-              <div className="mt-5 space-y-4">
+              <div className="mt-5 space-y-5">
                 <div
-                  className={`flex items-center gap-2 rounded-lg p-3 text-sm ${
-                    quality.status === "success"
+                  className={`flex items-center gap-2 rounded-lg p-4 text-sm font-semibold ${
+                    quality.status === "PASSED"
                       ? "bg-emerald-50 text-emerald-800"
                       : "bg-amber-50 text-amber-900"
                   }`}
                 >
-                  {quality.status === "success" ? (
+                  {quality.status === "PASSED" ? (
                     <CheckCircle2 className="h-5 w-5" />
                   ) : (
                     <XCircle className="h-5 w-5" />
                   )}
-
-                  <span className="font-semibold">
-                    {quality.message}
-                  </span>
+                  Validation status: {quality.status}
                 </div>
 
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="grid gap-3 sm:grid-cols-2">
                   <Metric
-                    label="Issues detected"
-                    value={display(summary?.total_issues_detected)}
-                    icon={TriangleAlert}
-                  />
-
-                  <Metric
-                    label="Duplicate records"
-                    value={display(summary?.total_duplicate_records)}
+                    label="Total rows scanned"
+                    value={formatDatasetNumber(quality.total_rows_scanned)}
                     icon={Rows3}
                   />
-
                   <Metric
-                    label="Execution mode"
-                    value={display(summary?.execution_mode)}
-                    icon={Clock3}
-                  />
-
-                  <Metric
-                    label="Source mutated"
-                    value={display(summary?.source_mutated)}
-                    icon={Database}
+                    label="Total violations"
+                    value={formatDatasetNumber(quality.violations.length)}
+                    icon={TriangleAlert}
                   />
                 </div>
 
                 <div>
-                  <h3 className="mb-2 font-semibold">Issue logs</h3>
-
-                  <ErrorList
-                    title="Issue logs"
-                    items={quality.quality_metadata?.issue_logs ?? []}
-                  />
+                  <h3 className="mb-3 font-semibold">Detected violations</h3>
+                  {quality.violations.length === 0 ? (
+                    <p className="rounded-lg bg-emerald-50 p-4 text-sm text-emerald-800">
+                      No quality violations detected.
+                    </p>
+                  ) : (
+                    <div className="space-y-3">
+                      {quality.violations.map((violation, index) => (
+                        <div
+                          key={`${violation.rule_id}-${violation.column}-${index}`}
+                          className="rounded-xl border border-slate-200 p-4"
+                        >
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <h4 className="font-semibold text-slate-950">
+                              {violation.rule_id}
+                            </h4>
+                            <span className="rounded-full bg-amber-100 px-3 py-1 text-xs font-semibold text-amber-800">
+                              {violation.severity}
+                            </span>
+                          </div>
+                          <p className="mt-2 text-sm text-slate-600">
+                            {violation.description}
+                          </p>
+                          <div className="mt-3 grid gap-2 text-sm sm:grid-cols-2">
+                            <p>
+                              <span className="text-slate-500">Column: </span>
+                              <span className="font-medium">{violation.column}</span>
+                            </p>
+                            <p>
+                              <span className="text-slate-500">Failed records: </span>
+                              <span className="font-medium">{formatDatasetNumber(violation.failed_count)}</span>
+                            </p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
                 </div>
 
-                <div>
-                  <h3 className="mb-2 font-semibold">
-                    Validation errors
-                  </h3>
-
-                  <ErrorList
-                    title="Validation errors"
-                    items={quality.quality_metadata?.errors ?? []}
-                  />
+                <div className="border-t border-slate-200 pt-4 text-xs text-slate-500">
+                  <p>Dataset: {quality.dataset_name}</p>
+                  <p>Executed: {new Date(quality.execution_timestamp).toLocaleString()}</p>
                 </div>
-
-                <p className="text-xs text-slate-500">
-                  Dataset: {quality.dataset_id} · Version: {quality.version}
-                </p>
               </div>
             )}
           </Panel>

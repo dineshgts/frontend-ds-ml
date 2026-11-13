@@ -1,2 +1,5 @@
-import DatasetWorkspaceView from "@/components/workspaces/DatasetWorkspaceView";
-export default function DatasetSectionPage() { return <DatasetWorkspaceView section="recommendations" />; }
+import DatasetRecommendations from "@/components/datasets/recommendations/DatasetRecommendations";
+
+export default function DatasetRecommendationsPage() {
+  return <DatasetRecommendations />;
+}

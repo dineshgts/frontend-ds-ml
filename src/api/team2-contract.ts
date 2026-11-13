@@ -114,32 +114,31 @@ export interface Team2ProfileRequest {
   };
 }
 
-export interface Team2QualityRequest { dataset_id: string; version: string; }
-export interface QualityIssue {
-  issue_id: string;
-  category: string;
-  severity: string;
-  affected_column: string;
-  affected_row_count: number;
-  description: string;
-  recommended_action: string;
-}
-export interface QualityValidationSummary {
-  total_issues_detected: number;
-  total_duplicate_records: number;
-  execution_mode: string;
-  source_mutated: boolean;
-}
-export interface Team2QualityResponse {
-  status: string;
-  message: string;
+/**
+ * Request schema required by Team 2 POST /api/v1/quality/.
+ * Current backend implementation resolves the dataset from dataset_id;
+ * version is required by Pydantic but is not currently used for lookup.
+ */
+export interface Team2QualityRequest {
   dataset_id: string;
   version: string;
-  quality_metadata: {
-    validation_summary: QualityValidationSummary;
-    issue_logs: QualityIssue[];
-    errors: unknown[];
-  };
+}
+
+/** Flat response returned by POST /api/v1/quality/. */
+export interface Team2QualityViolation {
+  rule_id: string;
+  column: string;
+  severity: string;
+  failed_count: number;
+  description: string;
+}
+
+export interface Team2QualityResponse {
+  dataset_name: string;
+  execution_timestamp: string;
+  total_rows_scanned: number;
+  status: "PASSED" | "FAILED_VALIDATION" | string;
+  violations: Team2QualityViolation[];
 }
 
 export interface Team2OrchestrationRequest {
@@ -163,7 +162,7 @@ export interface Team2OrchestrationResponse {
     quality_issue_count: number;
   };
   profiling: ProfilingResponse | Record<string, unknown>;
-  quality: Omit<Team2QualityResponse, "message" | "dataset_id" | "version"> | Record<string, unknown>;
+  quality: Team2QualityResponse | Record<string, unknown>;
   semantic_analysis: { status: string; message?: string };
 }
 

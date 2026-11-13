@@ -1,2 +1,5 @@
-import DatasetWorkspaceView from "@/components/workspaces/DatasetWorkspaceView";
-export default function DatasetSectionPage() { return <DatasetWorkspaceView section="quality" />; }
+import DatasetQuality from "@/components/datasets/quality/DatasetQuality";
+
+export default function DatasetQualityPage() {
+  return <DatasetQuality />;
+}

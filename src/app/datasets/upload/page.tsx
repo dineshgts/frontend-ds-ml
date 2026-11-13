@@ -349,33 +349,23 @@ export default function DatasetUploadPage() {
           />
         )}
 
-        {/* Actions */}
-        <div className="flex flex-col gap-3 border-t border-slate-100 pt-5 sm:flex-row sm:items-center sm:justify-between">
-          <label className="flex items-center gap-2 text-xs text-slate-500">
-            <input
-              type="checkbox"
-              checked={simulateError}
-              onChange={(event) => setSimulateError(event.target.checked)}
-              className="rounded border-slate-300"
-            />
-            Simulate an upload error for testing
-          </label>
-
-          <button
-            type="submit"
-            disabled={submissionState === "submitting" || !file}
-            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
-          >
-            {submissionState === "submitting" ? (
-              <>
-                <Loader2 className="h-4 w-4 animate-spin" />
-                Uploading...
-              </>
-            ) : (
-              "Submit dataset"
-            )}
-          </button>
-        </div>
+      {/* Actions */}
+<div className="flex w-full justify-end border-t border-slate-100 pt-5">
+  <button
+    type="submit"
+    disabled={submissionState === "submitting" || !file}
+    className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white shadow-sm transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-60"
+  >
+    {submissionState === "submitting" ? (
+      <>
+        <Loader2 className="h-4 w-4 animate-spin" />
+        Uploading...
+      </>
+    ) : (
+      "Submit dataset"
+    )}
+  </button>
+</div>
       </form>
     </main>
   );

@@ -1,2 +1,5 @@
-import DatasetWorkspaceView from "@/components/workspaces/DatasetWorkspaceView";
-export default function DatasetOverviewPage() { return <DatasetWorkspaceView section="overview" />; }
+import DatasetOverview from "@/components/datasets/overview/DatasetOverview";
+
+export default function DatasetOverviewPage() {
+  return <DatasetOverview />;
+}

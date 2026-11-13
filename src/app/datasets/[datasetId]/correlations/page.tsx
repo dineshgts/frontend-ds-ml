@@ -1,2 +1,5 @@
-import DatasetWorkspaceView from "@/components/workspaces/DatasetWorkspaceView";
-export default function DatasetSectionPage() { return <DatasetWorkspaceView section="correlations" />; }
+import DatasetCorrelations from "@/components/datasets/correlations/DatasetCorrelations";
+
+export default function DatasetCorrelationsPage() {
+  return <DatasetCorrelations />;
+}
