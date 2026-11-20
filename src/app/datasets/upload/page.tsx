@@ -39,7 +39,6 @@ export default function DatasetUploadPage() {
 
   const [file, setFile] = useState<File | null>(null);
   const [datasetName, setDatasetName] = useState("");
-  const [projectId, setProjectId] = useState("");
 
   const [validationError, setValidationError] = useState<string | null>(null);
   const [submissionState, setSubmissionState] =
@@ -98,7 +97,8 @@ export default function DatasetUploadPage() {
     }
 
     setFile(selected);
-    setDatasetName(getDatasetName(selected.name));
+    // Team 2 derives dataset_name from the original uploaded filename.
+    setDatasetName(selected.name);
   }
 
   function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
@@ -141,7 +141,6 @@ export default function DatasetUploadPage() {
       );
 
       clearFile();
-      setProjectId("");
       setSubmissionState("success");
     } catch (error: unknown) {
       setSubmissionState("error");
@@ -186,7 +185,7 @@ export default function DatasetUploadPage() {
         onSubmit={handleSubmit}
         className="space-y-6 rounded-2xl border border-slate-200 bg-white p-5 shadow-sm sm:p-7"
       >
-        {/* Dataset name */}
+        {/* Dataset name preview: the current backend uses the uploaded filename. */}
         <div>
           <label
             htmlFor="dataset-name"
@@ -198,37 +197,13 @@ export default function DatasetUploadPage() {
           <input
             id="dataset-name"
             value={datasetName}
-            onChange={(event) => setDatasetName(event.target.value)}
-            maxLength={120}
-            placeholder="e.g. Customer Sales Dataset"
-            className="min-h-11 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
+            readOnly
+            placeholder="Select a file to preview its dataset name"
+            className="min-h-11 w-full rounded-xl border border-slate-300 bg-slate-50 px-3 py-2 text-sm text-slate-600 outline-none"
           />
 
           <p className="mt-1 text-xs text-slate-500">
-            The initial name is taken from the selected filename.
-          </p>
-        </div>
-
-        {/* Project ID */}
-        <div>
-          <label
-            htmlFor="project-id"
-            className="mb-2 block text-sm font-semibold text-slate-800"
-          >
-            Project ID{" "}
-            <span className="font-normal text-slate-400">(optional)</span>
-          </label>
-
-          <input
-            id="project-id"
-            value={projectId}
-            onChange={(event) => setProjectId(event.target.value)}
-            placeholder="e.g. prj_001"
-            className="min-h-11 w-full rounded-xl border border-slate-300 px-3 py-2 text-sm outline-none focus:border-indigo-500 focus:ring-2 focus:ring-indigo-100"
-          />
-
-          <p className="mt-1 text-xs text-slate-500">
-            Project association is not currently supported by the backend upload API.
+            Team 2 uses the original filename as the dataset name. Custom dataset names and project association are not supported by the current upload API.
           </p>
         </div>
 

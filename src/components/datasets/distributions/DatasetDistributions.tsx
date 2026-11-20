@@ -5,5 +5,3 @@ import DatasetWorkspaceController from "@/components/datasets/workspace/DatasetW
 export default function DatasetDistributions() {
   return <DatasetWorkspaceController section="distributions" />;
 }
-
-

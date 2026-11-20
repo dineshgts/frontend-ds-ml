@@ -36,10 +36,15 @@ import {
 } from "@/api/datasets";
 
 import type { DatasetProfile } from "@/api/datasets";
-import { requestTeam2Quality } from "@/api/team2-contract";
+import {
+  requestTeam2Quality,
+  requestTeam2Semantic,
+  TEAM2_UNVERSIONED_DATASET_VERSION,
+} from "@/api/team2-contract";
 import type { Team2QualityResponse } from "@/api/team2-contract";
 
 import type { Dataset } from "@/types/dataset";
+import type { SemanticHandoffResult } from "@/types/semantic";
 
 import {
   formatDatasetDate,
@@ -53,6 +58,7 @@ const sections = [
   { key: "columns", label: "Columns", slug: "columns" },
   { key: "distributions", label: "Distributions", slug: "distributions" },
   { key: "correlations", label: "Correlations", slug: "correlations" },
+  { key: "semantic", label: "Semantic Understanding", slug: "semantic" },
   { key: "recommendations", label: "Recommendations", slug: "recommendations" },
 ] as const;
 
@@ -67,6 +73,8 @@ const descriptions: Record<string, string> = {
     "Explore numeric histograms and categorical top values returned by profiling.",
   correlations:
     "Inspect the correlation output returned by the profiling service.",
+  semantic:
+    "Review semantic column understanding, target suggestions, problem type, feature roles and leakage checks from Team 2.",
   recommendations:
     "Recommendations are not included in the current Team 2 profiling or quality contracts.",
 };
@@ -233,6 +241,14 @@ export default function DatasetWorkspaceView({
   const [qualityLoading, setQualityLoading] = useState(false);
   const [qualityError, setQualityError] = useState<string | null>(null);
 
+  // Semantic understanding state (loaded from the saved orchestration result)
+  const [semantic, setSemantic] = useState<SemanticHandoffResult | null>(null);
+  const [semanticLoading, setSemanticLoading] = useState(false);
+  const [semanticError, setSemanticError] = useState<string | null>(null);
+  const [semanticRunLoading, setSemanticRunLoading] = useState(false);
+  const [selectedTarget, setSelectedTarget] = useState("");
+  const [businessGoal, setBusinessGoal] = useState("");
+
   // Load dataset details
   const loadDataset = useCallback(
     async (signal?: AbortSignal) => {
@@ -285,6 +301,28 @@ export default function DatasetWorkspaceView({
       }
 
       setProfile(result.profiling);
+      if (active.key === "semantic") {
+        const semanticValue = result.semantic_analysis;
+        const semanticResult = Array.isArray(semanticValue)
+          ? semanticValue[0]
+          : semanticValue;
+        if (
+          semanticResult &&
+          typeof semanticResult === "object" &&
+          "candidates" in semanticResult
+        ) {
+          setSemantic(semanticResult as SemanticHandoffResult);
+          setSemanticError(null);
+        } else {
+          const generated = await requestTeam2Semantic({ profiles: [result.profiling] });
+          const generatedResult = generated[0];
+          if (!generatedResult) {
+            throw new Error("Team 2 returned no semantic result for this dataset.");
+          }
+          setSemantic(generatedResult);
+          setSemanticError(null);
+        }
+      }
 
     } catch (error) {
       setProfileError(
@@ -296,6 +334,111 @@ export default function DatasetWorkspaceView({
       setProfileLoading(false);
     }
   }
+
+  // Load the saved profiling result for the profiling-specific routes.
+  // Each route is a separate Next.js page, so local component state is recreated
+  // on navigation. Fetch the same saved result on the route that needs it.
+  useEffect(() => {
+    const needsProfile = [
+      "overview",
+      "columns",
+      "distributions",
+      "correlations",
+      "semantic",
+    ].includes(active.key);
+
+    if (!dataset || dataset.status !== "ready" || !needsProfile) return;
+
+    let cancelled = false;
+
+    async function loadSavedProfile() {
+      setProfileLoading(true);
+      setProfileError(null);
+      if (active.key === "semantic") {
+        setSemanticLoading(true);
+        setSemanticError(null);
+      }
+
+      try {
+        const result = await getDatasetProcessingResult(dataset!.id);
+        if (!result.profiling) {
+          throw new Error(
+            "The saved processing response does not contain profiling results."
+          );
+        }
+        if (!cancelled) {
+          setProfile(result.profiling);
+          if (active.key === "semantic") {
+            const semanticValue = result.semantic_analysis;
+            const semanticResult = Array.isArray(semanticValue)
+              ? semanticValue[0]
+              : semanticValue;
+
+            if (
+              semanticResult &&
+              typeof semanticResult === "object" &&
+              "candidates" in semanticResult
+            ) {
+              setSemantic(semanticResult as SemanticHandoffResult);
+            } else {
+              // The processing result may contain profiling but no saved
+              // semantic handoff. Run the actual Team 2 semantic endpoint.
+              setSemanticRunLoading(true);
+              try {
+                const generated = await requestTeam2Semantic({
+                  profiles: [result.profiling],
+                });
+                const generatedResult = generated[0];
+                if (!generatedResult) {
+                  throw new Error("Team 2 returned no semantic result for this dataset.");
+                }
+                if (!cancelled) {
+                  setSemantic(generatedResult);
+                  setSemanticError(null);
+                }
+              } catch (semanticRequestError) {
+                if (!cancelled) {
+                  setSemantic(null);
+                  setSemanticError(
+                    semanticRequestError instanceof Error
+                      ? semanticRequestError.message
+                      : "Semantic analysis could not be generated by Team 2."
+                  );
+                }
+              } finally {
+                if (!cancelled) setSemanticRunLoading(false);
+              }
+            }
+          }
+        }
+      } catch (error) {
+        if (!cancelled) {
+          setProfileError(
+            error instanceof Error
+              ? error.message
+              : "Profiling results could not be loaded."
+          );
+          if (active.key === "semantic") {
+            setSemanticError(
+              error instanceof Error
+                ? error.message
+                : "Semantic results could not be loaded."
+            );
+          }
+        }
+      } finally {
+        if (!cancelled) {
+          setProfileLoading(false);
+          if (active.key === "semantic") setSemanticLoading(false);
+        }
+      }
+    }
+
+    void loadSavedProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [dataset, active.key]);
 
   // Run Team 2 Data Quality validation
   async function runQuality() {
@@ -313,7 +456,7 @@ export default function DatasetWorkspaceView({
       // placeholder only when the backend has not supplied a real version.
       const qualityResult = await requestTeam2Quality({
         dataset_id: dataset.id,
-        version: dataset.version ?? "uploaded-dataset",
+        version: dataset.version ?? TEAM2_UNVERSIONED_DATASET_VERSION,
       });
 
       setQuality(qualityResult);
@@ -326,6 +469,40 @@ export default function DatasetWorkspaceView({
       );
     } finally {
       setQualityLoading(false);
+    }
+  }
+
+  // Re-run semantic detection using the real Team 2 POST contract.
+  // This computes a new proposal; the current backend package does not expose
+  // the separate review-decision persistence endpoints described by the TS handoff.
+  async function runSemanticWithOverrides() {
+    if (!dataset || !profile) return;
+
+    setSemanticRunLoading(true);
+    setSemanticError(null);
+
+    try {
+      const results = await requestTeam2Semantic({
+        profiles: [profile],
+        goal: businessGoal.trim() || undefined,
+        overrides: selectedTarget
+          ? { [dataset.name]: selectedTarget }
+          : undefined,
+      });
+
+      const nextResult = results[0];
+      if (!nextResult) {
+        throw new Error("Team 2 returned no semantic result for this dataset.");
+      }
+      setSemantic(nextResult);
+    } catch (error) {
+      setSemanticError(
+        error instanceof Error
+          ? error.message
+          : "Semantic detection could not be completed."
+      );
+    } finally {
+      setSemanticRunLoading(false);
     }
   }
 
@@ -409,8 +586,19 @@ export default function DatasetWorkspaceView({
         description={descriptions[active.key]}
         breadcrumb={`Datasets / ${dataset.name}`}
       />
+      {dataset.status === "failed" && dataset.processing_error && (
+        <div
+          role="alert"
+          className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"
+        >
+          <p className="font-semibold">Dataset processing failed</p>
+          <p className="mt-1">{dataset.processing_error}</p>
+        </div>
+      )}
       <div className="mt-5 space-y-6">
 
+        {active.key === "overview" && (
+          <>
         {/* Dataset overview card */}
         <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -481,13 +669,11 @@ export default function DatasetWorkspaceView({
           </div>
         </section>
 
+          </>
+        )}
+
         {/* Profiling section */}
-        {(
-          active.key === "overview" ||
-          active.key === "columns" ||
-          active.key === "distributions" ||
-          active.key === "correlations"
-        ) && (
+        {active.key === "overview" && (
           <Panel
             title="Data profiling"
             description="Loads the saved profiling result generated automatically after upload by Team 2 background processing."
@@ -545,8 +731,7 @@ export default function DatasetWorkspaceView({
         )}
 
         {/* Column profile */}
-        {profile &&
-          (active.key === "overview" || active.key === "columns") && (
+        {profile && active.key === "columns" && (
             <Panel
               title="Column profile"
               description="Column names, inferred types, missing counts, unique counts and statistics from Team 2."
@@ -630,7 +815,7 @@ export default function DatasetWorkspaceView({
                           ([key, value]) => (
                             <div key={key}>
                               <dt className="text-slate-500">
-                                {key.replaceAll("_", " ")}
+                                {key.replace(/_/g, " ")}
                               </dt>
 
                               <dd className="font-medium">
@@ -777,7 +962,7 @@ export default function DatasetWorkspaceView({
 
         {/* Class distribution */}
         {profile?.class_distribution &&
-          (active.key === "overview" || active.key === "columns") && (
+          active.key === "distributions" && (
             <Panel
               title="Class distribution"
               description={`Target column: ${profile.class_distribution.target_column}`}
@@ -962,6 +1147,214 @@ export default function DatasetWorkspaceView({
           </Panel>
         )}
 
+        {/* Semantic Understanding */}
+        {active.key === "semantic" && (
+          <div className="space-y-6">
+            {semanticLoading && (
+              <Panel title="Semantic analysis">
+                <p className="text-sm text-slate-500">Loading semantic analysis from the saved Team 2 processing result…</p>
+              </Panel>
+            )}
+
+            {semanticError && (
+              <ErrorState
+                title="Semantic analysis is not available"
+                message={semanticError}
+                onRetry={() => void runProfile()}
+              />
+            )}
+
+            {profile && (
+              <Panel
+                title="Run semantic analysis"
+                description="Generate or refresh semantic understanding using the saved profiling result from Team 2."
+              >
+                <div className="grid gap-3 rounded-xl border border-indigo-100 bg-indigo-50/50 p-4 md:grid-cols-[1fr_1fr_auto]">
+                  <label className="text-sm font-medium text-slate-700">
+                    Target column override
+                    <select
+                      value={selectedTarget}
+                      onChange={(event) => setSelectedTarget(event.target.value)}
+                      className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    >
+                      <option value="">Use automatic suggestion</option>
+                      {profileColumns.map((column) => (
+                        <option key={column.name} value={column.name}>{column.name}</option>
+                      ))}
+                    </select>
+                  </label>
+                  <label className="text-sm font-medium text-slate-700">
+                    Business goal (optional)
+                    <input
+                      value={businessGoal}
+                      onChange={(event) => setBusinessGoal(event.target.value)}
+                      placeholder="e.g. Predict employee attrition"
+                      className="mt-1 block w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-sm"
+                    />
+                  </label>
+                  <div className="flex items-end">
+                    <button
+                      type="button"
+                      onClick={() => void runSemanticWithOverrides()}
+                      disabled={semanticRunLoading || !profile}
+                      className="inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 py-2 text-sm font-semibold text-white disabled:opacity-60"
+                    >
+                      {semanticRunLoading ? "Analysing…" : semantic ? "Run again" : "Run semantic analysis"}
+                    </button>
+                  </div>
+                </div>
+                <p className="mt-2 text-xs text-slate-500">
+                  This sends the selected target and business goal to Team 2. It does not save a final review decision or approve model training.
+                </p>
+              </Panel>
+            )}
+
+            {semantic && (
+              <>
+                <Panel
+                  title="Target suggestion and problem type"
+                  description="Team 2 identifies possible prediction targets and the likely machine-learning problem. Treat the result as a proposal until reviewed."
+                >
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <Metric label="Suggested target" value={semantic.target ?? "Not identified"} icon={Database} />
+                    <Metric label="Problem type" value={semantic.problem_type.replace(/_/g, " ")} icon={ShieldCheck} />
+                    <Metric label="Confidence" value={`${(semantic.confidence * 100).toFixed(1)}%`} icon={CheckCircle2} />
+                    <Metric label="Target source" value={semantic.target_source.replace(/_/g, " ")} icon={FileSpreadsheet} />
+                  </div>
+                  <div className="mt-4 flex flex-wrap gap-2 text-xs">
+                    <span className="rounded-full bg-amber-50 px-3 py-1 font-semibold text-amber-800">{semantic.status}</span>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">Decision source: {semantic.source.replace(/_/g, " ")}</span>
+                    <span className="rounded-full bg-slate-100 px-3 py-1 text-slate-700">{semantic.needs_confirmation ? "Confirmation required" : "No confirmation flagged"}</span>
+                  </div>
+                  {semantic.evidence?.length > 0 && (
+                    <div className="mt-5">
+                      <h3 className="mb-2 text-sm font-semibold">Evidence</h3>
+                      <ul className="list-disc space-y-1 pl-5 text-sm text-slate-600">
+                        {semantic.evidence.map((item, index) => <li key={index}>{item}</li>)}
+                      </ul>
+                    </div>
+                  )}
+                </Panel>
+
+                <Panel
+                  title="Target candidates"
+                  description="Ranked target candidates returned by the semantic engine. Scores and priority labels are backend results."
+                >
+                  {semantic.candidates.length ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[760px] text-left text-sm">
+                        <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                          <tr>
+                            <th className="px-3 py-3">Rank</th>
+                            <th className="px-3 py-3">Candidate target</th>
+                            <th className="px-3 py-3">Semantic type</th>
+                            <th className="px-3 py-3">Problem type</th>
+                            <th className="px-3 py-3">Score</th>
+                            <th className="px-3 py-3">Confidence</th>
+                            <th className="px-3 py-3">Priority</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {semantic.candidates.map((candidate) => (
+                            <tr key={`${candidate.rank}-${candidate.candidate_target}`}>
+                              <td className="px-3 py-3">{candidate.rank}</td>
+                              <td className="px-3 py-3 font-medium">{candidate.candidate_target}</td>
+                              <td className="px-3 py-3">{candidate.semantic_type.replace(/_/g, " ")}</td>
+                              <td className="px-3 py-3">{candidate.suggested_problem_type.replace(/_/g, " ")}</td>
+                              <td className="px-3 py-3">{candidate.score.toFixed(1)}</td>
+                              <td className="px-3 py-3">{candidate.confidence_level}</td>
+                              <td className="px-3 py-3">{candidate.priority}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : <EmptyState title="No target candidates" description="Team 2 did not return a target candidate for this dataset." />}
+                </Panel>
+
+                <Panel title="Semantic column roles" description="Column classifications, feature eligibility, privacy flags, quality blocks and preprocessing hints.">
+                  {semantic.column_roles.length ? (
+                    <div className="overflow-x-auto">
+                      <table className="w-full min-w-[900px] text-left text-sm">
+                        <thead className="bg-slate-50 text-xs uppercase text-slate-500">
+                          <tr>
+                            <th className="px-3 py-3">Column</th>
+                            <th className="px-3 py-3">Semantic type</th>
+                            <th className="px-3 py-3">Role</th>
+                            <th className="px-3 py-3">Confidence / missing</th>
+                            <th className="px-3 py-3">Sensitive</th>
+                            <th className="px-3 py-3">Quality blocked</th>
+                            <th className="px-3 py-3">Preprocessing</th>
+                          </tr>
+                        </thead>
+                        <tbody className="divide-y divide-slate-100">
+                          {semantic.column_roles.map((role) => (
+                            <tr key={role.column}>
+                              <td className="px-3 py-3 font-medium">{role.column}</td>
+                              <td className="px-3 py-3">{role.semantic_type.replace(/_/g, " ")}</td>
+                              <td className="px-3 py-3">{role.role}</td>
+                              <td className="px-3 py-3">{role.missing_pct === null ? "—" : `${role.missing_pct}%`}</td>
+                              <td className="px-3 py-3">{role.sensitive ? "Yes" : "No"}</td>
+                              <td className="px-3 py-3">{role.quality_blocked ? "Yes" : "No"}</td>
+                              <td className="px-3 py-3">{role.preprocessing_hint}</td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                    </div>
+                  ) : <EmptyState title="No column roles" description="No semantic column-role information was returned." />}
+                </Panel>
+
+                <Panel title="Feature selection" description="Features recommended by Team 2. These are suggestions and do not automatically authorize model training.">
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <div className="rounded-xl border border-slate-200 p-4">
+                      <p className="text-sm text-slate-500">Recommended feature columns</p>
+                      <p className="mt-1 text-2xl font-semibold">{semantic.recommended_feature_columns.length}</p>
+                      <ul className="mt-3 space-y-1 text-sm">{semantic.recommended_feature_columns.map((name) => <li key={name}>{name}</li>)}</ul>
+                    </div>
+                    <div className="rounded-xl border border-slate-200 p-4">
+                      <p className="text-sm text-slate-500">Approved feature columns</p>
+                      <p className="mt-1 text-2xl font-semibold">{semantic.approved_feature_columns?.length ?? 0}</p>
+                      <ul className="mt-3 space-y-1 text-sm">{(semantic.approved_feature_columns ?? []).map((name) => <li key={name}>{name}</li>)}</ul>
+                    </div>
+                  </div>
+                  <p className="mt-3 text-sm text-slate-600">Feature status: <strong>{semantic.features_status.replace(/_/g, " ")}</strong></p>
+                </Panel>
+
+                <Panel title="Target leakage checks" description="Potential leakage suspects and the backend's leakage-check status.">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <Metric label="Check status" value={semantic.leakage_checks.status.replace(/_/g, " ")} icon={ShieldCheck} />
+                    <Metric label="Suspects" value={String(semantic.leakage_checks.suspects.length)} icon={TriangleAlert} />
+                    <Metric label="Possible threshold" value={String(semantic.leakage_checks.thresholds.possible)} icon={Clock3} />
+                  </div>
+                  <p className="mt-3 text-sm text-slate-600">{semantic.leakage_checks.reason}</p>
+                  {semantic.leakage_checks.suspects.length > 0 && (
+                    <div className="mt-4 space-y-2">
+                      {semantic.leakage_checks.suspects.map((suspect) => (
+                        <div key={suspect.column} className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm">
+                          <strong>{suspect.column}</strong> · {suspect.level} · correlation {suspect.correlation.toFixed(3)}
+                          <p className="mt-1">{suspect.message}</p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </Panel>
+
+                {(semantic.warnings.length > 0 || semantic.alternatives.length > 0) && (
+                  <Panel title="Warnings and alternative problem types">
+                    {semantic.warnings.length > 0 && <ErrorList title="Semantic warnings" items={semantic.warnings} />}
+                    {semantic.alternatives.length > 0 && (
+                      <div className="mt-4 space-y-2">
+                        {semantic.alternatives.map((alt, index) => <div key={index} className="rounded-lg border border-slate-200 p-3 text-sm"><strong>{alt.problem_type.replace(/_/g, " ")}</strong><p className="mt-1 text-slate-600">{alt.reason}</p></div>)}
+                      </div>
+                    )}
+                  </Panel>
+                )}
+              </>
+            )}
+          </div>
+        )}
+
         {/* Recommendations */}
         {active.key === "recommendations" && (
           <Panel
@@ -978,14 +1371,15 @@ export default function DatasetWorkspaceView({
         {/* Empty profiling state */}
         {active.key !== "quality" &&
           active.key !== "recommendations" &&
+          active.key !== "semantic" &&
           !profile && (
             <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-              Run data profiling to populate this section with backend results.
+              Saved profiling results are loading for this section. If this message remains, check the profiling API response.
             </p>
           )}
 
         {/* Profiling warnings */}
-        {profile && profile.warnings?.length > 0 && (
+        {active.key === "overview" && profile && profile.warnings?.length > 0 && (
           <Panel title="Profiling warnings">
             <ErrorList
               title="Warnings"
@@ -995,7 +1389,7 @@ export default function DatasetWorkspaceView({
         )}
 
         {/* Profiling errors */}
-        {profile && profile.errors?.length > 0 && (
+        {active.key === "overview" && profile && profile.errors?.length > 0 && (
           <Panel title="Profiling errors">
             <ErrorList
               title="Errors"

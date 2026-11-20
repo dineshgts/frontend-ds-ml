@@ -1,8 +1,21 @@
 /**
- * Exact API contracts implemented by Team 2 FastAPI.
- * Source of truth: FINAL_API_CONTRACT.md and the backend route schemas.
+ * Team 2 FastAPI endpoint adapters.
+ * Shared request/response schemas live in src/types/profiling.ts and
+ * src/types/data-quality.ts (provided by the team).
  */
 import { apiGet, apiPost } from "@/api/client";
+import type {
+  ProfilingRequest,
+  ProfilingResponse,
+} from "@/types/profiling";
+import type {
+  SemanticHandoffResult,
+  SemanticProblemType,
+} from "@/types/semantic";
+import type {
+  DataQualityResponse,
+  DataQualityRequest,
+} from "@/types/data-quality";
 
 export const TEAM2_API_PATHS = {
   health: "/health",
@@ -11,135 +24,24 @@ export const TEAM2_API_PATHS = {
   orchestration: "/api/v1/orchestration/",
 } as const;
 
-export type InferredType =
-  | "numerical" | "categorical" | "datetime" | "time"
-  | "text" | "boolean" | "mixed" | "empty";
-export type ProfilingStatus = "success" | "warning" | "failed";
-export type ColumnWarningCode =
-  | "EMPTY_COLUMN" | "CONSTANT_COLUMN" | "MIXED_TYPES" | "HIGH_CARDINALITY";
-export type ProfilingWarningCode =
-  | ColumnWarningCode | "EMPTY_DATASET" | "DUPLICATES_APPROXIMATE"
-  | "CLASS_DISTRIBUTION_SKIPPED";
+// Preserve the established API-facing names used by existing components.
+export type Team2ProfileRequest = ProfilingRequest;
+export type {
+  ProfilingResponse,
+  DataQualityRequest,
+};
+export type Team2QualityResponse = DataQualityResponse;
 
-export interface NumericSummary {
-  min?: number | null;
-  max?: number | null;
-  mean?: number | null;
-  median?: number | null;
-  std?: number | null;
-  q1?: number | null;
-  q3?: number | null;
-  skewness?: number | null;
-}
-export interface TopValue { value: string; count: number; percentage: number; }
-export interface HistogramBin { start: number; end: number; count: number; }
-export interface ColumnProfile {
-  name: string;
-  position: number;
-  dtype: string;
-  inferred_type: InferredType;
-  missing_count: number;
-  missing_pct: number;
-  unique_count: number;
-  likely_identifier: boolean;
-  warnings: ColumnWarningCode[];
-  summary?: NumericSummary | Record<string, unknown>;
-  top_values?: TopValue[];
-  histogram?: HistogramBin[];
-  mixed_breakdown?: Record<string, unknown>;
-}
-export interface ProfilingDataset {
-  row_count: number;
-  column_count: number;
-  column_names: string[];
-  duplicate_row_count: number;
-}
-export interface DatasetReference { dataset_id: string; name?: string | null; }
-export interface CorrelationPair { column_a: string; column_b: string; coefficient: number; }
-export interface ClassCount { value: string; count: number; percentage: number; }
-export interface ClassDistribution {
-  target_column: string;
-  class_count: number;
-  classes: ClassCount[];
-  majority_class: string;
-  minority_class: string;
-  imbalance_ratio: number | null;
-  missing_count: number;
-}
-export interface ProfilingWarning {
-  code: ProfilingWarningCode;
-  severity: string;
-  column: string | null;
-  message?: string;
-}
-export interface ProfilingError { code: string; message?: string; column?: string | null; }
-export interface ProfilingResponse {
-  schema_version: string;
-  request_id: string | null;
-  module: string;
-  status: ProfilingStatus | string;
-  generated_at: string;
-  duration_ms: number;
-  dataset_reference: DatasetReference;
-  dataset: ProfilingDataset;
-  columns: ColumnProfile[];
-  warnings: ProfilingWarning[];
-  errors: ProfilingError[];
-  correlations: CorrelationPair[];
-  class_distribution?: ClassDistribution;
-}
-
-export interface Team2ProfileRequest {
-  schema_version: "1.0-draft";
-  request_id: string;
-  dataset_reference: {
-    dataset_id: string;
-    source_type: "file";
-    name?: string;
-    location: string;
-  };
-  metadata?: {
-    format?: "csv" | "xlsx";
-    sheet_name?: string | number;
-    delimiter?: string;
-    encoding?: string;
-    missing_value_markers?: string[];
-    identifier_columns?: string[];
-  };
-  options?: {
-    top_n_values?: number;
-    include_statistics?: boolean;
-    target_column?: string;
-    include_correlations?: boolean;
-  };
-}
-
-/**
- * Request schema required by Team 2 POST /api/v1/quality/.
- * Current backend implementation resolves the dataset from dataset_id;
- * version is required by Pydantic but is not currently used for lookup.
- */
 export interface Team2QualityRequest {
   dataset_id: string;
   version: string;
 }
 
-/** Flat response returned by POST /api/v1/quality/. */
-export interface Team2QualityViolation {
-  rule_id: string;
-  column: string;
-  severity: string;
-  failed_count: number;
-  description: string;
-}
-
-export interface Team2QualityResponse {
-  dataset_name: string;
-  execution_timestamp: string;
-  total_rows_scanned: number;
-  status: "PASSED" | "FAILED_VALIDATION" | string;
-  violations: Team2QualityViolation[];
-}
+/**
+ * Compatibility value retained for the existing UI flow.
+ * Confirm with Team 2 whether this placeholder is accepted in production.
+ */
+export const TEAM2_UNVERSIONED_DATASET_VERSION = "unversioned";
 
 export interface Team2OrchestrationRequest {
   dataset_id: string;
@@ -151,10 +53,19 @@ export interface Team2OrchestrationRequest {
   options?: Record<string, unknown>;
   metadata?: Record<string, unknown>;
 }
+
 export interface Team2OrchestrationResponse {
-  dataset_context: { dataset_id: string; dataset_name: string; source_type: string };
+  dataset_context: {
+    dataset_id: string;
+    dataset_name: string;
+    source_type: string;
+  };
   status: string;
-  service_status: { profiling: string; quality: string; semantic_analysis: string };
+  service_status: {
+    profiling: string;
+    quality: string;
+    semantic_analysis: string;
+  };
   downstream_context: {
     profiling_output_available: boolean;
     quality_findings_available: boolean;
@@ -166,15 +77,69 @@ export interface Team2OrchestrationResponse {
   semantic_analysis: { status: string; message?: string };
 }
 
-export function requestTeam2Profiling(payload: Team2ProfileRequest, options: { signal?: AbortSignal } = {}) {
-  return apiPost<ProfilingResponse, Team2ProfileRequest>(TEAM2_API_PATHS.profiling, payload, options);
+export function requestTeam2Profiling(
+  payload: Team2ProfileRequest,
+  options: { signal?: AbortSignal } = {}
+) {
+  return apiPost<ProfilingResponse, Team2ProfileRequest>(
+    TEAM2_API_PATHS.profiling,
+    payload,
+    options
+  );
 }
-export function requestTeam2Quality(payload: Team2QualityRequest, options: { signal?: AbortSignal } = {}) {
-  return apiPost<Team2QualityResponse, Team2QualityRequest>(TEAM2_API_PATHS.quality, payload, options);
+
+export function requestTeam2Quality(
+  payload: Team2QualityRequest,
+  options: { signal?: AbortSignal } = {}
+) {
+  return apiPost<Team2QualityResponse, Team2QualityRequest>(
+    TEAM2_API_PATHS.quality,
+    payload,
+    options
+  );
 }
-export function requestTeam2Orchestration(payload: Team2OrchestrationRequest, options: { signal?: AbortSignal } = {}) {
-  return apiPost<Team2OrchestrationResponse, Team2OrchestrationRequest>(TEAM2_API_PATHS.orchestration, payload, options);
+
+export function requestTeam2Orchestration(
+  payload: Team2OrchestrationRequest,
+  options: { signal?: AbortSignal } = {}
+) {
+  return apiPost<Team2OrchestrationResponse, Team2OrchestrationRequest>(
+    TEAM2_API_PATHS.orchestration,
+    payload,
+    options
+  );
 }
+
 export function getTeam2Health(options: { signal?: AbortSignal } = {}) {
   return apiGet<{ status: string }>(TEAM2_API_PATHS.health, options);
+}
+
+
+/**
+ * Actual Team 2 semantic route contract from app/routes/semantic.py.
+ * The backend currently exposes POST /api/v1/semantic/ only.
+ */
+export interface Team2SemanticRequest {
+  profiles: ProfilingResponse[];
+  quality?: unknown;
+  goal?: string | null;
+  overrides?: Record<string, string>;
+  problem_type_override?: SemanticProblemType | Record<string, SemanticProblemType>;
+  quality_dataset?: string;
+  quality_settings?: Record<string, unknown>;
+  approved_feature_columns?: string[] | Record<string, string[]>;
+  leakage_settings?: Record<string, unknown>;
+}
+
+export type Team2SemanticResponse = SemanticHandoffResult[];
+
+export function requestTeam2Semantic(
+  payload: Team2SemanticRequest,
+  options: { signal?: AbortSignal } = {}
+) {
+  return apiPost<Team2SemanticResponse, Team2SemanticRequest>(
+    "/api/v1/semantic/",
+    payload,
+    options
+  );
 }
