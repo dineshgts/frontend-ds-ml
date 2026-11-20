@@ -36,7 +36,10 @@ import {
 } from "@/api/datasets";
 
 import type { DatasetProfile } from "@/api/datasets";
-import { requestTeam2Quality } from "@/api/team2-contract";
+import {
+  requestTeam2Quality,
+  TEAM2_UNVERSIONED_DATASET_VERSION,
+} from "@/api/team2-contract";
 import type { Team2QualityResponse } from "@/api/team2-contract";
 
 import type { Dataset } from "@/types/dataset";
@@ -297,6 +300,52 @@ export default function DatasetWorkspaceView({
     }
   }
 
+  // Load the saved profiling result for the profiling-specific routes.
+  // Each route is a separate Next.js page, so local component state is recreated
+  // on navigation. Fetch the same saved result on the route that needs it.
+  useEffect(() => {
+    const needsProfile = [
+      "overview",
+      "columns",
+      "distributions",
+      "correlations",
+    ].includes(active.key);
+
+    if (!dataset || dataset.status !== "ready" || !needsProfile) return;
+
+    let cancelled = false;
+
+    async function loadSavedProfile() {
+      setProfileLoading(true);
+      setProfileError(null);
+
+      try {
+        const result = await getDatasetProcessingResult(dataset!.id);
+        if (!result.profiling) {
+          throw new Error(
+            "The saved processing response does not contain profiling results."
+          );
+        }
+        if (!cancelled) setProfile(result.profiling);
+      } catch (error) {
+        if (!cancelled) {
+          setProfileError(
+            error instanceof Error
+              ? error.message
+              : "Profiling results could not be loaded."
+          );
+        }
+      } finally {
+        if (!cancelled) setProfileLoading(false);
+      }
+    }
+
+    void loadSavedProfile();
+    return () => {
+      cancelled = true;
+    };
+  }, [dataset, active.key]);
+
   // Run Team 2 Data Quality validation
   async function runQuality() {
     if (!dataset) return;
@@ -313,7 +362,7 @@ export default function DatasetWorkspaceView({
       // placeholder only when the backend has not supplied a real version.
       const qualityResult = await requestTeam2Quality({
         dataset_id: dataset.id,
-        version: dataset.version ?? "uploaded-dataset",
+        version: dataset.version ?? TEAM2_UNVERSIONED_DATASET_VERSION,
       });
 
       setQuality(qualityResult);
@@ -409,8 +458,19 @@ export default function DatasetWorkspaceView({
         description={descriptions[active.key]}
         breadcrumb={`Datasets / ${dataset.name}`}
       />
+      {dataset.status === "failed" && dataset.processing_error && (
+        <div
+          role="alert"
+          className="mt-4 rounded-xl border border-rose-200 bg-rose-50 p-4 text-sm text-rose-800"
+        >
+          <p className="font-semibold">Dataset processing failed</p>
+          <p className="mt-1">{dataset.processing_error}</p>
+        </div>
+      )}
       <div className="mt-5 space-y-6">
 
+        {active.key === "overview" && (
+          <>
         {/* Dataset overview card */}
         <section className="rounded-2xl border border-slate-200 bg-white p-5 sm:p-6">
           <div className="flex flex-wrap items-start justify-between gap-4">
@@ -481,13 +541,11 @@ export default function DatasetWorkspaceView({
           </div>
         </section>
 
+          </>
+        )}
+
         {/* Profiling section */}
-        {(
-          active.key === "overview" ||
-          active.key === "columns" ||
-          active.key === "distributions" ||
-          active.key === "correlations"
-        ) && (
+        {active.key === "overview" && (
           <Panel
             title="Data profiling"
             description="Loads the saved profiling result generated automatically after upload by Team 2 background processing."
@@ -545,8 +603,7 @@ export default function DatasetWorkspaceView({
         )}
 
         {/* Column profile */}
-        {profile &&
-          (active.key === "overview" || active.key === "columns") && (
+        {profile && active.key === "columns" && (
             <Panel
               title="Column profile"
               description="Column names, inferred types, missing counts, unique counts and statistics from Team 2."
@@ -777,7 +834,7 @@ export default function DatasetWorkspaceView({
 
         {/* Class distribution */}
         {profile?.class_distribution &&
-          (active.key === "overview" || active.key === "columns") && (
+          active.key === "distributions" && (
             <Panel
               title="Class distribution"
               description={`Target column: ${profile.class_distribution.target_column}`}
@@ -980,12 +1037,12 @@ export default function DatasetWorkspaceView({
           active.key !== "recommendations" &&
           !profile && (
             <p className="rounded-xl border border-dashed border-slate-300 p-4 text-sm text-slate-500">
-              Run data profiling to populate this section with backend results.
+              Saved profiling results are loading for this section. If this message remains, check the profiling API response.
             </p>
           )}
 
         {/* Profiling warnings */}
-        {profile && profile.warnings?.length > 0 && (
+        {active.key === "overview" && profile && profile.warnings?.length > 0 && (
           <Panel title="Profiling warnings">
             <ErrorList
               title="Warnings"
@@ -995,7 +1052,7 @@ export default function DatasetWorkspaceView({
         )}
 
         {/* Profiling errors */}
-        {profile && profile.errors?.length > 0 && (
+        {active.key === "overview" && profile && profile.errors?.length > 0 && (
           <Panel title="Profiling errors">
             <ErrorList
               title="Errors"
